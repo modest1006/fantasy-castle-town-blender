@@ -546,13 +546,20 @@ def make_house(name, cx, cy, width, depth, front_sign, style_seed, stone=False, 
 
     chimney_w = r.uniform(0.5, 0.8)
 
+    # Shared panel grid: timber studs, diagonal braces and windows all live on
+    # the same bays, so braces never cross a window opening. Roughly every
+    # third upper-floor panel takes a brace; the rest take windows.
+    bays = max(2, int(width / 2.8))
+
+    def is_diag_panel(bay, fl):
+        return (not stone) and fl >= 1 and (bay * 2 + fl) % 3 == 0
+
     if not stone:
         beam_x = facade_x + front_sign * 0.11
         for z in (floor_h, wall_h - 0.22):
             mb.box((beam_x, cy, z), (0.24, width, 0.22), MAT["timber"])
         for y in (cy - width / 2 + 0.18, cy + width / 2 - 0.18):
             mb.box((beam_x, y, wall_h * 0.55), (0.24, 0.22, wall_h * 0.88), MAT["timber"])
-        bays = max(2, int(width / 3.0))
         for bay in range(1, bays):
             y = cy - width / 2 + width * bay / bays
             mb.box((beam_x, y, (floor_h + wall_h) / 2), (0.24, 0.18, wall_h - floor_h), MAT["timber"])
@@ -560,13 +567,14 @@ def make_house(name, cx, cy, width, depth, front_sign, style_seed, stone=False, 
             y0 = cy - width / 2 + width * bay / bays + 0.28
             y1 = cy - width / 2 + width * (bay + 1) / bays - 0.28
             for fl in range(1, floors):
+                if not is_diag_panel(bay, fl):
+                    continue
                 z0 = fl * floor_h + 0.25
                 z1 = (fl + 1) * floor_h - 0.25
-                if (bay + fl) % 2:
+                if bay % 2:
                     z0, z1 = z1, z0
                 mb.beam((beam_x, y0, z0), (beam_x, y1, z1), 0.18, 0.24, MAT["timber"])
-
-    bays = max(2, int(width / 2.7))
+                mb.beam((beam_x, y0, z1), (beam_x, y1, z0), 0.18, 0.24, MAT["timber"])
     window_x = facade_x + front_sign * 0.15
     # Depth layering: glass recessed behind the wall plane, frame slightly
     # proud, sill stepping out further. Reads as a real opening up close.
@@ -578,6 +586,8 @@ def make_house(name, cx, cy, width, depth, front_sign, style_seed, stone=False, 
         z = fl * floor_h + 1.65
         for bay in range(bays):
             if fl == 0 and bay == bays // 2:
+                continue
+            if is_diag_panel(bay, fl):
                 continue
             y = cy - width / 2 + width * (bay + 0.5) / bays
             ww = min(1.15, width / bays * 0.53)
