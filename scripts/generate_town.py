@@ -128,11 +128,11 @@ def make_roof_texture(size, base, seed):
     col = np.floor(sx / cw).astype(np.int32)
     lx = np.mod(sx, cw) / cw
     ly = np.mod(yy, ch) / ch
-    course_shadow = np.clip(1.0 - ly * 2.2, 0.0, 1.0) * 0.10
-    seam = np.exp(-np.square((lx - 0.5) / 0.06)) * 0.0 + ((lx < 0.045) | (lx > 0.955)) * 0.06
+    course_shadow = np.clip(1.0 - ly * 2.2, 0.0, 1.0) * 0.17
+    seam = ((lx < 0.045) | (lx > 0.955)) * 0.11
     tile_hash = np.mod(np.sin((col + 3) * 12.9898 + (row + 7) * 78.233) * 43758.5453, 1.0)
     n = periodic_noise(size, seed, 4) - 0.5
-    shade = (tile_hash - 0.5) * 0.055 + n * 0.05 - course_shadow - seam
+    shade = (tile_hash - 0.5) * 0.11 + n * 0.07 - course_shadow - seam
     rgb = np.asarray(base, dtype=np.float32)[None, None, :] * (1.0 + shade)[:, :, None]
     return rgb
 
@@ -168,7 +168,7 @@ def generate_textures():
     grain = np.sin(math.tau * (xx * 26 + wood_n * 0.35))
     streaks = periodic_noise(size, 52, 3)
     wood = np.asarray((0.24, 0.095, 0.032))[None, None, :] + (
-        grain * 0.022 + (streaks - 0.5) * 0.045
+        grain * 0.05 + (streaks - 0.5) * 0.09
     )[:, :, None]
     outputs["wood"] = save_texture("wood_grain", wood)
     # Mottled two-tone grass with dry patches.
@@ -456,6 +456,29 @@ def make_house(name, cx, cy, width, depth, front_sign, style_seed, stone=False, 
         mb.box((cx + sx * roof_depth / 2, cy, wall_h + 0.03),
                (0.18, roof_width, 0.30), MAT["timber"])
 
+    # Occasional dormers on the street-facing slope break up the roofscape.
+    if not narrow and r.random() < 0.24:
+        count = 1 if width < 8 or r.random() < 0.5 else 2
+        for k in range(count):
+            dy = cy + (k - (count - 1) / 2) * width * 0.30 + r.uniform(-0.3, 0.3)
+            dx = cx + front_sign * roof_depth * 0.20
+            base_z = wall_h + roof_h * 0.16
+            mb.box((dx, dy, base_z + 0.55), (1.05, 1.2, 1.1), wall_mat)
+            mb.box((dx + front_sign * 0.55, dy, base_z + 0.58), (0.06, 0.62, 0.68), MAT["glass"])
+            mb.box((dx + front_sign * 0.58, dy, base_z + 0.58), (0.05, 0.08, 0.68), MAT["timber"])
+            # Tiny ridge-forward roof: two slopes + front gable triangle.
+            rd, rw, rh = 0.85, 0.85, 0.62
+            f = dx + front_sign * rd
+            b = dx - front_sign * rd * 0.4
+            top = base_z + 1.08
+            mb.face([(b, dy - rw, top), (f, dy - rw, top),
+                     (f, dy, top + rh), (b, dy, top + rh)], roof_mat)
+            mb.face([(f, dy + rw, top), (b, dy + rw, top),
+                     (b, dy, top + rh), (f, dy, top + rh)], roof_mat)
+            mb.face([(f, dy - rw, top), (f, dy + rw, top), (f, dy, top + rh)], wall_mat)
+
+    chimney_w = r.uniform(0.5, 0.8)
+
     if not stone:
         beam_x = facade_x + front_sign * 0.11
         for z in (floor_h, wall_h - 0.22):
@@ -478,6 +501,12 @@ def make_house(name, cx, cy, width, depth, front_sign, style_seed, stone=False, 
 
     bays = max(2, int(width / 2.7))
     window_x = facade_x + front_sign * 0.15
+    # Depth layering: glass recessed behind the wall plane, frame slightly
+    # proud, sill stepping out further. Reads as a real opening up close.
+    glass_x = facade_x - front_sign * 0.05
+    frame_x = facade_x + front_sign * 0.04
+    has_shutters = (not stone) and (not narrow) and r.random() < 0.30
+    shutter_angle = math.radians(r.uniform(12, 26))
     for fl in range(floors):
         z = fl * floor_h + 1.65
         for bay in range(bays):
@@ -486,13 +515,24 @@ def make_house(name, cx, cy, width, depth, front_sign, style_seed, stone=False, 
             y = cy - width / 2 + width * (bay + 0.5) / bays
             ww = min(1.15, width / bays * 0.53)
             wh = 1.28
-            mb.box((window_x, y, z), (0.12, ww, wh), MAT["glass"])
-            for oy in (-ww / 2 - 0.075, ww / 2 + 0.075):
-                mb.box((window_x + front_sign * 0.07, y + oy, z), (0.12, 0.12, wh + 0.24), MAT["timber"])
-            for oz in (-wh / 2 - 0.075, wh / 2 + 0.075):
-                mb.box((window_x + front_sign * 0.07, y, z + oz), (0.12, ww + 0.28, 0.12), MAT["timber"])
-            mb.box((window_x + front_sign * 0.08, y, z), (0.11, 0.07, wh), MAT["timber"])
-            mb.box((window_x + front_sign * 0.08, y, z), (0.11, ww, 0.07), MAT["timber"])
+            mb.box((glass_x, y, z), (0.10, ww, wh), MAT["glass"])
+            for oy in (-ww / 2 - 0.06, ww / 2 + 0.06):
+                mb.box((frame_x, y + oy, z), (0.14, 0.12, wh + 0.24), MAT["timber"])
+            mb.box((frame_x, y, z + wh / 2 + 0.06), (0.14, ww + 0.28, 0.12), MAT["timber"])
+            mb.box((facade_x + front_sign * 0.07, y, z - wh / 2 - 0.07),
+                   (0.24, ww + 0.34, 0.10), MAT["wood"])
+            mb.box((glass_x + front_sign * 0.03, y, z), (0.09, 0.06, wh), MAT["timber"])
+            mb.box((glass_x + front_sign * 0.03, y, z), (0.09, ww, 0.06), MAT["timber"])
+            if has_shutters and fl >= 1:
+                sw = ww * 0.52
+                off_x = math.sin(shutter_angle) * sw / 2
+                off_y = math.cos(shutter_angle) * sw / 2
+                for side in (-1, 1):
+                    hinge_y = y + side * (ww / 2 + 0.10)
+                    mb.box((facade_x + front_sign * (0.06 + off_x),
+                            hinge_y + side * off_y, z),
+                           (0.05, sw, wh + 0.10), MAT["wood"],
+                           rot=-side * front_sign * shutter_angle)
 
     door_y = cy + r.uniform(-0.16, 0.16) * width
     mb.box((window_x, door_y, 1.1), (0.15, 1.22, 2.2), MAT["wood"])
@@ -518,7 +558,10 @@ def make_house(name, cx, cy, width, depth, front_sign, style_seed, stone=False, 
 
     chimney_x = cx - front_sign * depth * 0.18
     chimney_y = cy + r.uniform(-0.3, 0.3) * width
-    mb.box((chimney_x, chimney_y, wall_h + roof_h * 0.62), (0.65, 0.65, roof_h + 1.2), MAT["stone"])
+    mb.box((chimney_x, chimney_y, wall_h + roof_h * 0.62),
+           (chimney_w, chimney_w, roof_h + 1.2), MAT["stone"])
+    mb.box((chimney_x, chimney_y, wall_h + roof_h * 1.22 + 0.05),
+           (chimney_w + 0.18, chimney_w + 0.18, 0.16), MAT["stone2"])
     return mb.object(name, COLLECTIONS["Town"])
 
 
@@ -587,24 +630,22 @@ def add_cobbles():
     # The road surface itself is a flat textured strip; geometry is reserved
     # for a sparse scatter of slightly proud accent stones. A full paver grid
     # was ~78% of the whole scene's triangles and made colliders bumpy.
-    def scatter(x0, x1, y0, y1, step, chance):
-        y = y0
-        row = 0
-        while y < y1:
-            x = x0 + (0.45 if row % 2 else 0.0)
-            while x < x1:
-                w = r.uniform(0.65, 0.9) * scale
-                if r.random() < chance:
-                    mb.box((x, y, 0.135 + r.uniform(-0.008, 0.008)),
-                           (w * 0.93, r.uniform(0.38, 0.56) * scale * 0.88, 0.06),
-                           MAT["road2"] if r.random() < 0.35 else MAT["road"],
-                           r.uniform(-0.05, 0.05))
-                x += w
-            y += step
-            row += 1
-    scatter(-5.65, 5.65, -88.0, 82.0, 0.5 * scale * 2.2, 0.075)
+    # Worn patches instead of lone floaters: stones cluster in small repaired
+    # areas, sit half-sunk into the road (top ~3cm proud), same-family color.
+    def patches(x0, x1, y0, y1, count):
+        for _ in range(count):
+            px, py = r.uniform(x0, x1), r.uniform(y0, y1)
+            for _ in range(r.randint(5, 11)):
+                ox, oy = px + r.gauss(0, 0.85), py + r.gauss(0, 0.85)
+                if not (x0 - 0.4 < ox < x1 + 0.4 and y0 < oy < y1):
+                    continue
+                mb.box((ox, oy, 0.082), (r.uniform(0.45, 0.7) * scale * 1.6,
+                                         r.uniform(0.3, 0.5) * scale * 1.6, 0.05),
+                       MAT["road2"] if r.random() < 0.2 else MAT["road"],
+                       r.uniform(-0.4, 0.4))
+    patches(-5.2, 5.2, -86.0, 80.0, 8 if TEST_MODE else 55)
     if not TEST_MODE:
-        scatter(-29.5, 29.5, 10.5, 39.5, 1.15, 0.075)
+        patches(-29.0, 29.0, 11.0, 39.0, 30)
     mb.object("Ground_Cobblestones", COLLECTIONS["Ground"])
 
 
@@ -734,6 +775,39 @@ def make_market_and_props():
             mb.cylinder((x, y, 2.1), 0.09, 4.2, MAT["iron"], 8)
             mb.box((x, y, 4.35), (0.48, 0.48, 0.68), MAT["light"])
             mb.box((x, y, 4.73), (0.68, 0.68, 0.10), MAT["iron"])
+
+    # Street-life clusters hugging the facades: barrels, crates, benches,
+    # planters. Placed at wall edges and corners, never mid-street.
+    cr = random.Random(SEED + 91)
+    for cy_ in range(-70, 71, 9):
+        if cr.random() < 0.5:
+            continue
+        side = cr.choice((-1, 1))
+        bx = side * cr.uniform(8.7, 9.4)
+        for _ in range(cr.randint(2, 4)):
+            ox = bx + cr.uniform(-0.4, 0.2) * side
+            oy = cy_ + cr.uniform(-1.4, 1.4)
+            roll = cr.random()
+            if roll < 0.45:
+                mb.cylinder((ox, oy, 0.52), 0.42, 1.0, MAT["wood"], 10)
+                mb.cylinder((ox, oy, 0.52), 0.44, 0.09, MAT["iron"], 10)
+            elif roll < 0.8:
+                s = cr.uniform(0.55, 0.85)
+                mb.box((ox, oy, s / 2 + 0.1), (s, s, s), MAT["wood"], cr.uniform(0, 1.5))
+            else:
+                mb.box((ox, oy, 0.5), (0.45, 1.35, 0.09), MAT["wood"])
+                for ly in (-0.55, 0.55):
+                    mb.box((ox, oy + ly, 0.25), (0.4, 0.1, 0.42), MAT["timber"])
+    # Planters and a handcart give the plaza human-scale accents.
+    for px, py in ((-8.5, 14.5), (9.5, 35.5), (-15, 33)):
+        mb.box((px, py, 0.4), (1.0, 1.0, 0.72), MAT["wood"])
+        mb.sphere((px, py, 1.15), 0.58, MAT["leaf"], 8, 5)
+    cart_x, cart_y = 12.5, 21.0
+    mb.box((cart_x, cart_y, 0.82), (1.5, 2.6, 0.16), MAT["wood"], 0.35)
+    for wy in (-0.9, 0.9):
+        mb.cylinder((cart_x + 0.62, cart_y + wy, 0.55), 0.52, 0.12, MAT["timber"], 12, axis="X")
+    mb.box((cart_x - 0.6, cart_y - 1.7, 0.55), (0.09, 1.3, 0.09), MAT["timber"], 0.5)
+    mb.box((cart_x - 0.6, cart_y + 1.7, 0.55), (0.09, 1.3, 0.09), MAT["timber"], -0.5)
     mb.object("Prop_MarketFountainStallsStreetFurniture", COLLECTIONS["Props"])
 
 
