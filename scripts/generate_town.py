@@ -22,6 +22,7 @@ SEED = 517042
 RNG = random.Random(SEED)
 TEST_MODE = os.environ.get("TOWN_TEST", "0") == "1"
 DUSK_MODE = os.environ.get("TOWN_DUSK", "0") == "1"
+TURNTABLE_MODE = os.environ.get("TOWN_TURNTABLE", "0") == "1"
 ROOT = Path(__file__).resolve().parent.parent
 RENDER_DIR = ROOT / "renders"
 EXPORT_DIR = ROOT / "export"
@@ -928,6 +929,127 @@ def make_castle():
             )
 
 
+def make_castle_inner_details():
+    """Occupied inner-bailey details without changing the castle silhouette."""
+    mb = MeshBuilder()
+    # Side courts fit between the front drum towers and perimeter roads. The
+    # gate axis remains completely clear for the tunnel sight line.
+    for x in (-36.0, 36.0):
+        mb.box((x, 90.0, 0.08), (11.0, 14.0, 0.16), MAT["road"])
+        # Pale edge stones make the court boundary legible from above.
+        for ex in (-5.35, 5.35):
+            mb.box((x + ex, 90.0, 0.17), (0.35, 14.0, 0.18), MAT["stone2"])
+        for ey in (-6.85, 6.85):
+            mb.box((x, 90.0 + ey, 0.17), (11.0, 0.35, 0.18), MAT["stone2"])
+
+    # Broad, shallow entry steps meet the tunnel's raised floor.
+    for y, width, height in ((82.25, 9.0, 0.06),
+                             (82.65, 8.5, 0.10),
+                             (83.05, 8.0, 0.14)):
+        mb.box((0, y, height / 2), (width, 0.78, height), MAT["stone2"])
+
+    # Two banner poles frame the entrance while staying outside the tower
+    # footprints and clear of the central approach.
+    for i, x in enumerate((-34.0, 34.0)):
+        mb.cylinder((x, 84.7, 4.6), 0.10, 9.2, MAT["iron"], 8)
+        mb.cylinder((x, 84.7, 0.18), 0.42, 0.30, MAT["stone"], 10)
+        mb.box((x + (0.75 if i == 0 else -0.75), 84.7, 8.45),
+               (1.55, 0.09, 0.09), MAT["gold"])
+        direction = 1 if i == 0 else -1
+        mb.face(((x, 84.65, 8.40),
+                 (x + direction * 1.45, 84.65, 8.40),
+                 (x + direction * 1.28, 84.65, 6.15),
+                 (x, 84.65, 6.65)), MAT["rose"])
+
+    # Crates, barrels and a weapon rack occupy the edges rather than the
+    # maneuvering space at the center of each court.
+    for x, y, size in ((-39.0, 86.0, 0.85), (-37.8, 86.4, 0.70),
+                       (-39.1, 87.2, 0.62), (31.8, 86.2, 0.82)):
+        mb.box((x, y, size / 2 + 0.18), (size, size, size),
+               MAT["wood"], rot=0.12 * x)
+    for x, y in ((-32.0, 86.2), (-32.0, 87.25), (39.0, 86.5)):
+        mb.cylinder((x, y, 0.62), 0.46, 1.12, MAT["wood"], 10)
+        mb.cylinder((x, y, 0.62), 0.48, 0.10, MAT["iron"], 10)
+    mb.box((-40.2, 92.8, 1.15), (0.22, 3.4, 2.3), MAT["timber"])
+    for y in (91.7, 92.8, 93.9):
+        mb.beam((-40.0, y, 0.35), (-39.1, y, 2.35), 0.10, 0.12, MAT["iron"])
+    mb.object("Castle_InnerCourtyardsAndStores", COLLECTIONS["Castle"])
+
+    # Compact guard post on the east court. Its 6.4m roofline stays far below
+    # the adjacent 35m drum tower and therefore does not alter the skyline.
+    mb = MeshBuilder()
+    gx, gy = 36.0, 92.0
+    mb.box((gx, gy, 2.1), (7.0, 5.0, 4.2), MAT["stone"])
+    mb.hip_roof(gx, gy, 4.2, 7.7, 5.8, 2.2, MAT["slate"])
+    mb.box((gx, gy - 2.54, 1.35), (1.35, 0.18, 2.7), MAT["wood"])
+    for x in (gx - 2.25, gx + 2.25):
+        mb.box((x, gy - 2.55, 2.15), (0.82, 0.16, 1.15), MAT["glass"])
+        mb.box((x, gy - 2.64, 1.48), (1.02, 0.24, 0.16), MAT["stone2"])
+    mb.box((gx, gy + 2.55, 1.0), (5.2, 0.18, 1.8), MAT["timber"])
+    mb.object("Castle_GuardPost", COLLECTIONS["Castle"])
+
+
+def make_outskirts():
+    """Approach landscape outside the south gate: river with a stone bridge,
+    the approach road, fenced crop fields, farmhouses and a windmill."""
+    mb = MeshBuilder()
+    # Approach road from the gate to the horizon.
+    mb.box((0, -128, 0.01), (5.2, 74, 0.1), MAT["road"])
+    # River crossing east-west. Water sits just above the grass with low
+    # soil banks so the edge reads from first person.
+    mb.box((0, -114, -0.02), (230, 9.0, 0.06), MAT["water"])
+    for sy in (-5.6, 5.6):
+        mb.box((0, -114 + sy, 0.03), (230, 2.2, 0.14), MAT["soil"])
+    # Stone bridge: gently arched deck in three segments plus parapets.
+    mb.box((0, -114, 0.55), (6.4, 7.2, 0.5), MAT["stone2"])
+    for sy in (-6.2, 6.2):
+        mb.box((0, -114 + sy, 0.32), (6.4, 5.6, 0.55), MAT["stone2"], rot=0)
+    for sx in (-2.9, 2.9):
+        mb.box((sx, -114, 1.25), (0.5, 18.0, 1.0), MAT["stone"])
+    mb.object("Ground_ApproachRoadRiverBridge", COLLECTIONS["Ground"])
+
+    # Crop fields with furrow rows and fence posts.
+    mb = MeshBuilder()
+    fr = random.Random(SEED + 131)
+    fields = [(-16, -104, 16, 12), (17, -106, 18, 13), (-20, -128, 18, 14),
+              (18, -132, 15, 15), (-14, -148, 20, 12)]
+    for fx, fy, fw, fd in fields:
+        mb.box((fx, fy, 0.03), (fw, fd, 0.14), MAT["soil"])
+        crop = MAT["leaf"] if fr.random() < 0.6 else MAT["ochre"]
+        rows = int(fd / 1.6)
+        for k in range(rows):
+            ry = fy - fd / 2 + (k + 0.5) * fd / rows
+            mb.box((fx, ry, 0.16), (fw * 0.92, 0.55, 0.18), crop)
+        for px in (-fw / 2, fw / 2):
+            for py in range(int(-fd / 2), int(fd / 2) + 1, 3):
+                mb.box((fx + px, fy + py, 0.55), (0.14, 0.14, 1.1), MAT["timber"])
+            mb.box((fx + px, fy, 1.0), (0.09, fd, 0.09), MAT["timber"])
+    # Haystacks.
+    for hx, hy in ((-27, -110), (28, -122), (-8, -140)):
+        mb.cone((hx, hy), 0.1, 1.6, 2.6, MAT["ochre"], 10)
+    mb.object("Prop_FarmFields", COLLECTIONS["Props"])
+
+    # Windmill on a low knoll west of the road.
+    mb = MeshBuilder()
+    wx, wy = -30, -136
+    mb.cylinder((wx, wy, 5.5), 3.0, 11.0, MAT["stone2"], 12)
+    mb.cone((wx, wy), 11.0, 3.5, 3.4, MAT["green"], 12)
+    mb.box((wx, wy - 2.6, 1.5), (1.3, 0.8, 2.6), MAT["wood"])
+    hub_y = wy - 3.4
+    mb.cylinder((wx, hub_y + 0.3, 9.8), 0.35, 1.0, MAT["timber"], 8, axis="Y")
+    for ang in (0.785, 2.356, 3.927, 5.498):
+        dx, dz = math.cos(ang), math.sin(ang)
+        mb.beam((wx + dx * 0.6, hub_y, 9.8 + dz * 0.6),
+                (wx + dx * 6.2, hub_y, 9.8 + dz * 6.2), 0.22, 0.22, MAT["timber"])
+        mb.beam((wx + dx * 2.2, hub_y + 0.12, 9.8 + dz * 2.2),
+                (wx + dx * 6.0, hub_y + 0.12, 9.8 + dz * 6.0), 0.1, 1.35, MAT["cream2"])
+    mb.object("Prop_Windmill", COLLECTIONS["Props"])
+
+    # Farmhouses flanking the road.
+    make_house("House_Farm_A", -13, -117.5, 8.5, 7, 1, 9101)
+    make_house("House_Farm_B", 14, -145, 9.0, 7.5, -1, 9102)
+
+
 def make_landmarks():
     """Secondary landmarks below the castle's dominant 61m keep."""
     mb = MeshBuilder()
@@ -1089,7 +1211,12 @@ def make_walls():
         mb.cylinder((x, -92, 9.5), 6, 19, MAT["stone2"], 12)
         mb.cylinder((x, -92, 19.3), 6.8, 1.2, MAT["stone"], 12)
     mb.box((0, -92, 15), (16, 5, 7), MAT["stone2"])
-    mb.box((0, -89.4, 7.0), (9.5, 0.25, 11), MAT["iron"])
+    # Half-raised portcullis: a bar grid in the upper part of the opening so
+    # the main street stays visible through the gate from the approach road.
+    for bx in range(-4, 5, 1):
+        mb.box((bx, -89.4, 10.4), (0.16, 0.16, 4.4), MAT["iron"])
+    for bz in (8.6, 10.2, 11.8):
+        mb.box((0, -89.4, bz), (9.2, 0.14, 0.14), MAT["iron"])
     mb.object("Wall_OuterRingAndSouthGate", COLLECTIONS["Walls"])
 
 
@@ -1439,6 +1566,7 @@ def render_views(cam):
             "alley_fp": (alley_loc, alley_tgt, 35),
             "church_fp": ((-56, 42, 1.6), (-25, 64, 13), 27),
             "wizard_fp": ((36.5, 13, 1.6), (40.5, 30, 15), 30),
+            "approach_fp": ((-7, -161, 2.2), (1, -88, 15), 30),
         }
     if TEST_MODE:
         if DUSK_MODE:
@@ -1457,6 +1585,50 @@ def render_views(cam):
         point_camera(cam, loc, target, lens)
         bpy.context.scene.render.filepath = str(RENDER_DIR / f"{name}.png")
         bpy.ops.render.render(write_still=True)
+
+
+def render_turntable(cam):
+    """Render a deterministic one-orbit H.264 overview animation."""
+    scene = bpy.context.scene
+    scene.frame_start = 1
+    scene.frame_end = 24 if TEST_MODE else 216
+    scene.render.fps = 24
+    scene.render.fps_base = 1.0
+    scene.render.resolution_x = 640 if TEST_MODE else 1280
+    scene.render.resolution_y = 360 if TEST_MODE else 720
+    scene.render.resolution_percentage = 100
+    # Blender 5.1 filters file_format by media_type; VIDEO must be selected
+    # before FFMPEG becomes a valid enum item.
+    scene.render.image_settings.media_type = "VIDEO"
+    scene.render.image_settings.file_format = "FFMPEG"
+    scene.render.ffmpeg.format = "MPEG4"
+    scene.render.ffmpeg.codec = "H264"
+    scene.render.ffmpeg.constant_rate_factor = "MEDIUM"
+    scene.render.ffmpeg.ffmpeg_preset = "GOOD"
+    scene.render.filepath = str(RENDER_DIR / "turntable.mp4")
+
+    center = Vector((0.0, 10.0, 14.0))
+    radius = 180.0
+    height = 92.0
+    frame_count = scene.frame_end - scene.frame_start + 1
+    for frame in range(scene.frame_start, scene.frame_end + 1):
+        angle = math.tau * (frame - scene.frame_start) / frame_count
+        cam.location = (radius * math.cos(angle),
+                        10.0 + radius * math.sin(angle), height)
+        direction = center - cam.location
+        cam.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
+        cam.data.lens = 48
+        cam.keyframe_insert(data_path="location", frame=frame)
+        cam.keyframe_insert(data_path="rotation_euler", frame=frame)
+
+    # Every rendered integer frame has an explicit transform key, avoiding
+    # dependence on Blender 5.1's layered Action/F-Curve interpolation API.
+    scene.frame_set(scene.frame_start)
+    log(
+        f"Rendering turntable: {frame_count} frames, {scene.render.fps}fps, "
+        f"{scene.render.resolution_x}x{scene.render.resolution_y}"
+    )
+    bpy.ops.render.render(animation=True)
 
 
 def export_scene():
@@ -1503,22 +1675,31 @@ def validate_and_report():
 def main():
     log(
         f"Starting seed={SEED}, test_mode={TEST_MODE}, dusk_mode={DUSK_MODE}, "
+        f"turntable_mode={TURNTABLE_MODE}, "
         f"Blender={bpy.app.version_string}"
     )
     build_streets_and_houses()
     add_cobbles()
     make_castle()
+    make_castle_inner_details()
     make_landmarks()
+    make_outskirts()
     make_walls()
     make_market_and_props()
     make_green_space_props()
     make_trees_and_mountains()
     cam = setup_scene()
     validate_and_report()
-    render_views(cam)
-    if not DUSK_MODE and (not TEST_MODE or os.environ.get("TOWN_TEST_EXPORT", "0") == "1"):
+    if TURNTABLE_MODE:
+        render_turntable(cam)
+    else:
+        render_views(cam)
+    if (not TURNTABLE_MODE and not DUSK_MODE
+            and (not TEST_MODE or os.environ.get("TOWN_TEST_EXPORT", "0") == "1")):
         export_scene()
-    if DUSK_MODE:
+    if TURNTABLE_MODE:
+        blend_name = "town_turntable_test.blend" if TEST_MODE else "town_turntable.blend"
+    elif DUSK_MODE:
         blend_name = "town_dusk_test.blend" if TEST_MODE else "town_dusk.blend"
     else:
         blend_name = "town_test.blend" if TEST_MODE else "town.blend"
