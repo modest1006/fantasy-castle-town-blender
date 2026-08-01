@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell($b = Get-Command blender -ErrorAction SilentlyContinue; if \\($b\\) { $b.Source } else { Get-ChildItem \"C:\\\\Program Files\\\\Blender Foundation\" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name })",
+      "PowerShell(gh auth status)"
+    ]
+  }
+}

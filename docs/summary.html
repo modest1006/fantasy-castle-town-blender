@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fantasy Castle Town — 制作まとめ</title>
+<style>
+  :root { --ink:#2b2620; --paper:#f6f1e7; --accent:#8a5a2b; --card:#fffdf8; }
+  body { margin:0; font-family:"Segoe UI","Hiragino Sans","Noto Sans JP",sans-serif;
+         background:var(--paper); color:var(--ink); line-height:1.7; }
+  header { background:linear-gradient(160deg,#3d3428,#6b5335); color:#f2e8d5;
+           padding:2.2rem 1.5rem; text-align:center; }
+  header h1 { margin:0 0 .4rem; font-size:1.7rem; letter-spacing:.05em; }
+  header p { margin:.2rem 0; opacity:.85; }
+  main { max-width:1080px; margin:0 auto; padding:1.5rem; }
+  h2 { border-left:6px solid var(--accent); padding-left:.6rem; margin-top:2.4rem; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:1rem; }
+  figure { margin:0; background:var(--card); border:1px solid #e2d8c4; border-radius:10px;
+           overflow:hidden; box-shadow:0 2px 8px rgba(60,45,20,.08); }
+  figure img { width:100%; display:block; }
+  figcaption { padding:.55rem .8rem; font-size:.88rem; }
+  figcaption b { color:var(--accent); }
+  table { border-collapse:collapse; width:100%; background:var(--card); font-size:.9rem; }
+  th,td { border:1px solid #ddd0b8; padding:.5rem .7rem; text-align:left; vertical-align:top; }
+  th { background:#efe6d3; }
+  code { background:#eee4cf; padding:.1rem .35rem; border-radius:4px; font-size:.85em; }
+  .pill { display:inline-block; background:#efe6d3; border-radius:999px; padding:.1rem .7rem;
+          font-size:.8rem; margin:.1rem .2rem .1rem 0; }
+  footer { text-align:center; padding:2rem; font-size:.85rem; opacity:.7; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🏰 Fantasy Castle Town — Blender プロシージャル生成</h1>
+  <p>Blender 5.1 headless / Claude × Codex 共同制作 / 2026-08-01</p>
+  <p><span class="pill">〜36万 tris</span><span class="pill">生成 約6秒</span>
+     <span class="pill">テクスチャ10枚 全て自前生成</span><span class="pill">GLB / FBX / .blend</span></p>
+</header>
+<main>
+
+<h2>最終レンダリング</h2>
+<div class="grid">
+  <figure><img src="../renders/main_street_fp.png" alt="メインストリート">
+    <figcaption><b>メインストリート</b> — 一人称 (目線1.6m)。連続ファサードの街並みの奥に城がランドマークとして見える</figcaption></figure>
+  <figure><img src="../renders/plaza_fp.png" alt="市場広場">
+    <figcaption><b>市場広場</b> — 段付き噴水・屋台・街灯。地面は自前生成の石畳テクスチャ＋散布した浮き石</figcaption></figure>
+  <figure><img src="../renders/castle_gate_fp.png" alt="城門前">
+    <figcaption><b>城門前</b> — アーチと迫石、金の落とし格子。石壁はブロックパターンの生成テクスチャ</figcaption></figure>
+  <figure><img src="../renders/alley_fp.png" alt="路地">
+    <figcaption><b>路地</b> — 幅約3m。庇・看板を省いた narrow モードの建物で圧迫感を演出しつつ通行可能</figcaption></figure>
+  <figure><img src="../renders/overview.png" alt="俯瞰">
+    <figcaption><b>俯瞰</b> — 城・城下町・市場広場・外周城壁。建物は隣接配置で市街の密度を確保</figcaption></figure>
+  <figure><img src="../renders/overview_quarter.png" alt="クォータービュー">
+    <figcaption><b>クォータービュー</b> — 屋根瓦3色 (テラコッタ/スレート/緑) と壁色のバリエーション</figcaption></figure>
+</div>
+
+<h2>制作体制 — Claude と Codex の役割交代</h2>
+<table>
+  <tr><th>ラウンド</th><th>実装</th><th>レビュー</th><th>主な内容</th></tr>
+  <tr><td>v1</td><td>Codex</td><td>Claude</td>
+      <td>SPEC策定(Claude)→初期実装。連続ファサード・城・広場・城壁は成立。ローポリ感が残る</td></tr>
+  <tr><td>v2</td><td>Codex</td><td>Claude</td>
+      <td>【追加要件】テクスチャ自前生成 (numpy→PNG 9枚、UV適用、GLB/FBX同梱)。城再構築・軒の張り出し</td></tr>
+  <tr><td>v3</td><td>Claude</td><td>Codex</td>
+      <td>瓦の市松模様化を修正、木目のマーブル化を修正、山をコーン群→連続稜線リングに、路地の装飾過多を整理、樹冠を球体化、草地テクスチャ追加</td></tr>
+  <tr><td>v4-v5</td><td>Claude</td><td>Codex指摘反映</td>
+      <td>石畳ジオメトリ削減 (全体trisの78%→散布方式)、テクスチャの完全タイリング保証 (整数波数ベクトル)、FBXをメッシュのみに、マテリアルスロット絞り込み、雪頂、地平の黒帯修正、カメラ調整</td></tr>
+</table>
+
+<h2>自前生成テクスチャ (ダウンロード素材なし)</h2>
+<p>numpy で 512px のシームレステクスチャを生成。整数波数の周期ノイズでタイリングを数学的に保証。</p>
+<p>
+<span class="pill">cobblestone (石畳)</span><span class="pill">plaster ×3 (漆喰 クリーム/ローズ/オーカー)</span>
+<span class="pill">stone_blocks (石壁)</span><span class="pill">roof_tile ×3 (瓦)</span>
+<span class="pill">wood_grain (木目)</span><span class="pill">grass (草地)</span>
+</p>
+
+<h2>技術メモ</h2>
+<table>
+  <tr><th>項目</th><th>内容</th></tr>
+  <tr><td>生成</td><td><code>blender -b --factory-startup -P scripts/generate_town.py</code>、シード固定で再現可能、約6秒</td></tr>
+  <tr><td>ジオメトリ</td><td>bmesh不使用の直接メッシュ構築 (MeshBuilder)。窓・木骨・庇・胸壁は全てジオメトリ</td></tr>
+  <tr><td>UV</td><td>面法線ベースのボックス投影 (決定的・オペレータ非依存)</td></tr>
+  <tr><td>レンダ</td><td>Eevee Next / Nishita空 / AgX。霞リング＋二重稜線リング＋広域地面で地平線を処理</td></tr>
+  <tr><td>Unity向け</td><td>1unit=1m、FBXはメッシュのみ・テクスチャ隣接コピー、メッシュごとに使用マテリアルのみ登録、浮き石はCollider非推奨</td></tr>
+</table>
+
+</main>
+<footer>Generated with Blender 5.1.2 — Claude Code × Codex collaboration</footer>
+</body>
+</html>
