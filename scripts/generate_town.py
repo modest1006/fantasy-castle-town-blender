@@ -303,11 +303,38 @@ def add_point_light(name, location, energy=320.0, color=(1.0, 0.28, 0.055), radi
     return obj
 
 
+# --- Main street centerline -------------------------------------------------
+# Gentle S-curve running the full length of town. Endpoints return to x=0 so
+# both the south gate and the castle gate stay on axis. Every building row,
+# road strip, lantern and camera shares this lateral shift, which preserves
+# alley widths and inter-row spacing while bending the whole town.
+STREET_AMP = 6.5
+STREET_Y0, STREET_Y1 = -92.0, 84.0
+
+
+def street_x(y):
+    return STREET_AMP * math.sin(math.tau * (y - STREET_Y0) / (STREET_Y1 - STREET_Y0))
+
+
+def street_rot(y):
+    slope = (STREET_AMP * math.tau / (STREET_Y1 - STREET_Y0)
+             * math.cos(math.tau * (y - STREET_Y0) / (STREET_Y1 - STREET_Y0)))
+    return -math.atan(slope)
+
+
 class MeshBuilder:
     def __init__(self):
         self.vertices = []
         self.faces = []
         self.mat_ids = []
+
+    def rotate_about(self, cx, cy, angle):
+        if abs(angle) < 1e-6:
+            return
+        c, s = math.cos(angle), math.sin(angle)
+        for i, (x, y, z) in enumerate(self.vertices):
+            dx, dy = x - cx, y - cy
+            self.vertices[i] = (cx + dx * c - dy * s, cy + dx * s + dy * c, z)
 
     def face(self, verts, mat):
         start = len(self.vertices)
@@ -474,7 +501,7 @@ class MeshBuilder:
         return obj
 
 
-def make_house(name, cx, cy, width, depth, front_sign, style_seed, stone=False, narrow=False):
+def make_house(name, cx, cy, width, depth, front_sign, style_seed, stone=False, narrow=False, rot=0.0):
     r = random.Random(style_seed)
     light_r = random.Random(SEED * 17 + style_seed)
     mb = MeshBuilder()
@@ -642,6 +669,7 @@ def make_house(name, cx, cy, width, depth, front_sign, style_seed, stone=False, 
            (chimney_w, chimney_w, roof_h + 1.2), MAT["stone"])
     mb.box((chimney_x, chimney_y, wall_h + roof_h * 1.22 + 0.05),
            (chimney_w + 0.18, chimney_w + 0.18, 0.16), MAT["stone2"])
+    mb.rotate_about(cx, cy, rot)
     return mb.object(name, COLLECTIONS["Town"])
 
 
@@ -657,9 +685,14 @@ def fill_row(prefix, x, y0, y1, depth, front_sign, seed_base, narrow=False):
     widths.append(total - used)
     cursor = y0
     for i, width in enumerate(widths):
-        make_house(f"House_{prefix}_{i:02d}", x, cursor + width / 2, width, depth,
-                   front_sign, seed_base * 100 + i, stone=(i % 7 in (3, 6)), narrow=narrow)
-        cursor += width
+        y_c = cursor + width / 2
+        # Follow the street curve: lateral shift plus tangent rotation. The
+        # slight cursor under-advance overlaps neighbours a hair so convex-
+        # side wedge gaps never open between rotated houses.
+        make_house(f"House_{prefix}_{i:02d}", street_x(y_c) + x, y_c, width + 0.25, depth,
+                   front_sign, seed_base * 100 + i, stone=(i % 7 in (3, 6)), narrow=narrow,
+                   rot=street_rot(y_c))
+        cursor += width * 0.995
 
 
 def build_streets_and_houses():
@@ -668,12 +701,29 @@ def build_streets_and_houses():
     # Far apron out to the mountain ring: without it, downward sight lines
     # from elevated cameras slip past the mist ring into black sub-horizon sky.
     ground.box((0, 0, -1.3), (760, 760, 0.8), MAT["grass"])
-    ground.box((0, -5, 0.015), (12.5, 174, 0.12), MAT["road"])
+    def road_strip(x_offset, half_w, y0, y1, mat, step=4.0):
+        # Curve-following surface: top quads at z=0.076 plus side skirts so
+        # the raised road edge never shows a hollow underside.
+        ys = []
+        y = y0
+        while y < y1:
+            ys.append(y)
+            y += step
+        ys.append(y1)
+        for a, b in zip(ys, ys[1:]):
+            xla, xra = street_x(a) + x_offset - half_w, street_x(a) + x_offset + half_w
+            xlb, xrb = street_x(b) + x_offset - half_w, street_x(b) + x_offset + half_w
+            ground.face([(xla, a, 0.076), (xra, a, 0.076),
+                         (xrb, b, 0.076), (xlb, b, 0.076)], mat)
+            ground.face([(xla, a, -0.06), (xla, a, 0.076), (xlb, b, 0.076), (xlb, b, -0.06)], mat)
+            ground.face([(xra, a, 0.076), (xra, a, -0.06), (xrb, b, -0.06), (xrb, b, 0.076)], mat)
+
+    road_strip(0, 6.25, -92, 84, MAT["road"])
     ground.box((0, 25, 0.025), (61, 30, 0.14), MAT["road2"])
-    ground.box((30, -18, 0.02), (46, 4.2, 0.12), MAT["road"])
-    ground.box((-30, 51, 0.02), (46, 4.2, 0.12), MAT["road"])
-    ground.box((27, -51, 0.02), (4.6, 66, 0.12), MAT["road"])
-    ground.box((-27, -18, 0.02), (3.0, 70, 0.12), MAT["road"])
+    ground.box((27.5, -18, 0.02), (51, 4.2, 0.12), MAT["road"])
+    ground.box((-28.5, 51, 0.02), (49, 4.2, 0.12), MAT["road"])
+    road_strip(27, 2.3, -84, -18, MAT["road"])
+    road_strip(-27, 1.5, -53, 17, MAT["road"])
     ground.box((46, -8, 0.02), (4.0, 142, 0.12), MAT["road"])
     ground.box((-46, -8, 0.02), (4.0, 142, 0.12), MAT["road"])
     ground.object("Ground_RoadsAndTerrain", COLLECTIONS["Ground"])
@@ -712,18 +762,19 @@ def add_cobbles():
     # was ~78% of the whole scene's triangles and made colliders bumpy.
     # Worn patches instead of lone floaters: stones cluster in small repaired
     # areas, sit half-sunk into the road (top ~3cm proud), same-family color.
-    def patches(x0, x1, y0, y1, count):
+    def patches(x0, x1, y0, y1, count, follow_curve=False):
         for _ in range(count):
             px, py = r.uniform(x0, x1), r.uniform(y0, y1)
             for _ in range(r.randint(5, 11)):
                 ox, oy = px + r.gauss(0, 0.85), py + r.gauss(0, 0.85)
                 if not (x0 - 0.4 < ox < x1 + 0.4 and y0 < oy < y1):
                     continue
-                mb.box((ox, oy, 0.082), (r.uniform(0.45, 0.7) * scale * 1.6,
-                                         r.uniform(0.3, 0.5) * scale * 1.6, 0.05),
+                shift = street_x(oy) if follow_curve else 0.0
+                mb.box((ox + shift, oy, 0.095), (r.uniform(0.45, 0.7) * scale * 1.6,
+                                                 r.uniform(0.3, 0.5) * scale * 1.6, 0.05),
                        MAT["road2"] if r.random() < 0.2 else MAT["road"],
                        r.uniform(-0.4, 0.4))
-    patches(-5.2, 5.2, -86.0, 80.0, 8 if TEST_MODE else 55)
+    patches(-5.2, 5.2, -86.0, 80.0, 8 if TEST_MODE else 55, follow_curve=True)
     if not TEST_MODE:
         patches(-29.0, 29.0, 11.0, 39.0, 30)
     mb.object("Ground_Cobblestones", COLLECTIONS["Ground"])
@@ -923,7 +974,8 @@ def make_market_and_props():
     # Lanterns along the street.
     street_lamp_x = 5.65
     for y in range(-60, 73, 12):
-        for x in (-street_lamp_x, street_lamp_x):
+        for side in (-street_lamp_x, street_lamp_x):
+            x = street_x(y) + side
             mb.cylinder((x, y, 2.1), 0.09, 4.2, MAT["iron"], 8)
             mb.box((x, y, 4.35), (0.48, 0.48, 0.68), MAT["light"])
             mb.box((x, y, 4.73), (0.68, 0.68, 0.10), MAT["iron"])
@@ -938,7 +990,7 @@ def make_market_and_props():
             continue
         side = cr.choice((-1, 1))
         # Facades sit at ~±5.9m; clusters hug the wall on the street side.
-        bx = side * cr.uniform(5.15, 5.5)
+        bx = street_x(cy_) + side * cr.uniform(5.15, 5.5)
         for _ in range(cr.randint(2, 4)):
             ox = bx + cr.uniform(-0.4, 0.2) * side
             oy = cy_ + cr.uniform(-1.4, 1.4)
@@ -1124,9 +1176,15 @@ def point_camera(cam, location, target, lens):
 
 
 def render_views(cam):
+    # First-person cameras stand on the curved street and aim along it.
+    ms_loc = (street_x(-72), -72, 1.6)
+    ms_tgt = (street_x(-10) * 0.5, 30, 11)
+    alley_loc = (street_x(-42) + 26.9, -42, 1.6)
+    alley_tgt = (street_x(-4) + 26.9, -2, 4.2)
+    gate_loc = (street_x(34) + 1.2, 34, 1.6)
     if DUSK_MODE:
         views = {
-            "dusk_main_street": ((0, -72, 1.6), (0, 65, 12), 32),
+            "dusk_main_street": (ms_loc, (ms_tgt[0], 65, 12), 32),
             "dusk_plaza": ((-14, 12, 1.6), (3, 27, 2.6), 34),
             "dusk_overview_quarter": ((94, -104, 62), (0, 15, 10), 52),
         }
@@ -1134,10 +1192,10 @@ def render_views(cam):
         views = {
             "overview": ((122, -140, 112), (0, 18, 13), 47),
             "overview_quarter": ((94, -104, 62), (0, 15, 10), 52),
-            "main_street_fp": ((0, -72, 1.6), (0, 65, 15), 32),
+            "main_street_fp": (ms_loc, ms_tgt, 32),
             "plaza_fp": ((-14, 12, 1.6), (3, 27, 2.6), 34),
-            "castle_gate_fp": ((-2.5, 34, 1.6), (0.5, 89, 9.5), 32),
-            "alley_fp": ((26.75, -42, 1.6), (26.75, -2, 4.2), 35),
+            "castle_gate_fp": (gate_loc, (0.5, 89, 9.5), 32),
+            "alley_fp": (alley_loc, alley_tgt, 35),
         }
     if TEST_MODE:
         if DUSK_MODE:
