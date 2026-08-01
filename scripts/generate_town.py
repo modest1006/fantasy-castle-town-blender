@@ -447,7 +447,8 @@ def make_house(name, cx, cy, width, depth, front_sign, style_seed, stone=False, 
     roof_depth = depth + 1.55
     roof_width = width + 0.80
     roof_h = r.uniform(2.1, 3.8)
-    if r.random() < 0.72:
+    is_gable = r.random() < 0.72
+    if is_gable:
         mb.gable_roof(cx, cy, wall_h, roof_depth, roof_width, roof_h, roof_mat)
     else:
         mb.hip_roof(cx, cy, wall_h, roof_depth, roof_width, roof_h, roof_mat)
@@ -457,20 +458,25 @@ def make_house(name, cx, cy, width, depth, front_sign, style_seed, stone=False, 
                (0.18, roof_width, 0.30), MAT["timber"])
 
     # Occasional dormers on the street-facing slope break up the roofscape.
-    if not narrow and r.random() < 0.24:
+    # Gable roofs only: the slope height at any X is analytic, so the dormer
+    # can sit ON the surface instead of sinking into it.
+    if is_gable and not narrow and r.random() < 0.24:
+        def slope_z(x):
+            return wall_h + roof_h * max(0.0, 1.0 - abs(x - cx) / (roof_depth / 2))
         count = 1 if width < 8 or r.random() < 0.5 else 2
         for k in range(count):
             dy = cy + (k - (count - 1) / 2) * width * 0.30 + r.uniform(-0.3, 0.3)
-            dx = cx + front_sign * roof_depth * 0.20
-            base_z = wall_h + roof_h * 0.16
-            mb.box((dx, dy, base_z + 0.55), (1.05, 1.2, 1.1), wall_mat)
-            mb.box((dx + front_sign * 0.55, dy, base_z + 0.58), (0.06, 0.62, 0.68), MAT["glass"])
-            mb.box((dx + front_sign * 0.58, dy, base_z + 0.58), (0.05, 0.08, 0.68), MAT["timber"])
+            x_front = cx + front_sign * roof_depth * 0.30
+            base_z = slope_z(x_front) - 0.35
+            dx = x_front - front_sign * 0.45
+            mb.box((dx, dy, base_z + 0.55), (1.15, 1.2, 1.1), wall_mat)
+            mb.box((x_front + front_sign * 0.13, dy, base_z + 0.62), (0.06, 0.62, 0.68), MAT["glass"])
+            mb.box((x_front + front_sign * 0.16, dy, base_z + 0.62), (0.05, 0.08, 0.68), MAT["timber"])
             # Tiny ridge-forward roof: two slopes + front gable triangle.
-            rd, rw, rh = 0.85, 0.85, 0.62
-            f = dx + front_sign * rd
-            b = dx - front_sign * rd * 0.4
-            top = base_z + 1.08
+            rw, rh = 0.85, 0.62
+            f = x_front + front_sign * 0.25
+            b = dx - front_sign * 0.75
+            top = base_z + 1.06
             mb.face([(b, dy - rw, top), (f, dy - rw, top),
                      (f, dy, top + rh), (b, dy, top + rh)], roof_mat)
             mb.face([(f, dy + rw, top), (b, dy + rw, top),
@@ -780,10 +786,13 @@ def make_market_and_props():
     # planters. Placed at wall edges and corners, never mid-street.
     cr = random.Random(SEED + 91)
     for cy_ in range(-70, 71, 9):
+        if 5 < cy_ < 44:
+            continue  # plaza block manages its own props
         if cr.random() < 0.5:
             continue
         side = cr.choice((-1, 1))
-        bx = side * cr.uniform(8.7, 9.4)
+        # Facades sit at ~±5.9m; clusters hug the wall on the street side.
+        bx = side * cr.uniform(5.15, 5.5)
         for _ in range(cr.randint(2, 4)):
             ox = bx + cr.uniform(-0.4, 0.2) * side
             oy = cy_ + cr.uniform(-1.4, 1.4)
@@ -799,15 +808,19 @@ def make_market_and_props():
                 for ly in (-0.55, 0.55):
                     mb.box((ox, oy + ly, 0.25), (0.4, 0.1, 0.42), MAT["timber"])
     # Planters and a handcart give the plaza human-scale accents.
-    for px, py in ((-8.5, 14.5), (9.5, 35.5), (-15, 33)):
+    for px, py in ((-26.5, 12.5), (27, 37.5), (-27, 33)):
         mb.box((px, py, 0.4), (1.0, 1.0, 0.72), MAT["wood"])
         mb.sphere((px, py, 1.15), 0.58, MAT["leaf"], 8, 5)
-    cart_x, cart_y = 12.5, 21.0
-    mb.box((cart_x, cart_y, 0.82), (1.5, 2.6, 0.16), MAT["wood"], 0.35)
-    for wy in (-0.9, 0.9):
-        mb.cylinder((cart_x + 0.62, cart_y + wy, 0.55), 0.52, 0.12, MAT["timber"], 12, axis="X")
-    mb.box((cart_x - 0.6, cart_y - 1.7, 0.55), (0.09, 1.3, 0.09), MAT["timber"], 0.5)
-    mb.box((cart_x - 0.6, cart_y + 1.7, 0.55), (0.09, 1.3, 0.09), MAT["timber"], -0.5)
+    # Handcart: bed long in Y, axle along X, wheels either side, twin handles.
+    cart_x, cart_y = 14.5, 27.5
+    mb.box((cart_x, cart_y, 0.78), (1.35, 2.5, 0.14), MAT["wood"])
+    for side_ in (-0.55, 0.55):
+        mb.box((cart_x + side_, cart_y, 1.02), (0.10, 2.5, 0.34), MAT["wood"])
+    for wx in (-0.82, 0.82):
+        mb.cylinder((cart_x + wx, cart_y, 0.52), 0.5, 0.12, MAT["timber"], 12, axis="X")
+    mb.cylinder((cart_x, cart_y, 0.52), 0.06, 1.8, MAT["iron"], 8, axis="X")
+    for hx in (-0.45, 0.45):
+        mb.box((cart_x + hx, cart_y - 1.85, 0.72), (0.08, 1.2, 0.08), MAT["timber"])
     mb.object("Prop_MarketFountainStallsStreetFurniture", COLLECTIONS["Props"])
 
 
