@@ -23,6 +23,8 @@ RNG = random.Random(SEED)
 TEST_MODE = os.environ.get("TOWN_TEST", "0") == "1"
 DUSK_MODE = os.environ.get("TOWN_DUSK", "0") == "1"
 TURNTABLE_MODE = os.environ.get("TOWN_TURNTABLE", "0") == "1"
+WALKTHROUGH_MODE = os.environ.get("TOWN_WALKTHROUGH", "0") == "1"
+SNOW_MODE = os.environ.get("TOWN_SNOW", "0") == "1"
 ROOT = Path(__file__).resolve().parent.parent
 RENDER_DIR = ROOT / "renders"
 EXPORT_DIR = ROOT / "export"
@@ -180,6 +182,27 @@ def generate_textures():
         (g1 - 0.5) * 0.09
     )[:, :, None] + np.maximum(g2 - 0.66, 0)[:, :, None] * np.asarray((0.22, 0.16, 0.02))[None, None, :]
     outputs["grass"] = save_texture("grass_mottled", grass)
+    if SNOW_MODE:
+        # Seamless blue-white powder with broad wind-packed variation and a
+        # fine crystalline grain. Integer wave counts retain exact tiling.
+        snow_large = periodic_noise(size, SEED + 701, 5)
+        snow_fine = periodic_noise(size, SEED + 702, 7)
+        yy_n, xx_n = np.mgrid[0:size, 0:size].astype(np.float32) / size
+        wind = np.sin(math.tau * (xx_n * 3 + yy_n * 1)) * 0.018
+        snow_rgb = np.asarray((0.82, 0.89, 0.94), dtype=np.float32)[None, None, :]
+        snow_rgb = snow_rgb + (
+            (snow_large - 0.5) * 0.105
+            + (snow_fine - 0.5) * 0.035
+            + wind
+        )[:, :, None]
+        outputs["snow_surface"] = save_texture("snow_surface", snow_rgb)
+        packed = np.asarray((0.64, 0.70, 0.74), dtype=np.float32)[None, None, :]
+        packed = packed + (
+            (snow_large - 0.5) * 0.09
+            + (snow_fine - 0.5) * 0.025
+            - np.maximum(periodic_noise(size, SEED + 703, 3) - 0.63, 0) * 0.16
+        )[:, :, None]
+        outputs["snow_path"] = save_texture("snow_path", packed)
     return outputs
 
 
@@ -261,7 +284,11 @@ MAT = {
     "road2": material("MAT_CobbleLight", (0.34, 0.34, 0.31), 0.96, texture="cobble"),
     "soil": material("MAT_Soil", (0.22, 0.18, 0.105), 0.98),
     "grass": material("MAT_Grass", (0.14, 0.245, 0.10), 0.96, texture="grass"),
-    "leaf": material("MAT_Leaves", (0.075, 0.21, 0.075), 0.92),
+    "leaf": material(
+        "MAT_Leaves",
+        (0.10, 0.15, 0.11) if SNOW_MODE else (0.075, 0.21, 0.075),
+        0.92,
+    ),
     "water": material("MAT_Water", (0.06, 0.25, 0.31), 0.25, metallic=0.1),
     "iron": material("MAT_Iron", (0.035, 0.04, 0.04), 0.42, metallic=0.72),
     "gate_iron": material("MAT_GateIron", (0.13, 0.14, 0.145), 0.38, metallic=0.64),
@@ -288,6 +315,15 @@ MAT = {
         (0.16, 0.22, 0.34) if DUSK_MODE else (0.58, 0.69, 0.78),
     ),
 }
+if SNOW_MODE:
+    MAT["snow_surface"] = material(
+        "MAT_SnowSurface", (0.82, 0.89, 0.94), 0.94,
+        texture="snow_surface",
+    )
+    MAT["snow_path"] = material(
+        "MAT_PackedSnow", (0.64, 0.70, 0.74), 0.96,
+        texture="snow_path",
+    )
 ALL_MATERIALS = list(MAT.values())
 MAT_INDEX = {m.name: i for i, m in enumerate(ALL_MATERIALS)}
 
@@ -536,7 +572,7 @@ def make_house(name, cx, cy, width, depth, front_sign, style_seed, stone=False, 
     floor_lights = []
     for fl in range(floors):
         chance = 0.34 if fl == 0 else (0.52 if fl == floors - 1 else 0.68)
-        if DUSK_MODE and light_r.random() < chance:
+        if (DUSK_MODE or SNOW_MODE) and light_r.random() < chance:
             floor_lights.append(
                 MAT["glass_lit"] if light_r.random() < 0.58 else MAT["glass_lit_soft"]
             )
@@ -1484,6 +1520,59 @@ def make_trees_and_mountains():
     mountains.object("Environment_DistantMountains", COLLECTIONS["Environment"])
 
 
+def apply_snow_cover():
+    """Replace only upward-facing exterior polygons with packed snow."""
+    if not SNOW_MODE:
+        return
+    snow_mat = MAT["snow_surface"]
+    path_snow_mat = MAT["snow_path"]
+    path_materials = {MAT["road"].name, MAT["road2"].name}
+    roof_materials = {MAT["tile"].name, MAT["slate"].name, MAT["green"].name}
+    excluded_materials = {
+        MAT["glass"].name,
+        MAT["glass_lit"].name,
+        MAT["glass_lit_soft"].name,
+        MAT["water"].name,
+        MAT["light"].name,
+        MAT["crystal"].name,
+        MAT["gold"].name,
+    }
+    covered_faces = 0
+    covered_meshes = 0
+    for obj in bpy.context.scene.objects:
+        if obj.type != "MESH" or obj.name == "Environment_DistantMountains":
+            continue
+        mesh = obj.data
+        snow_slots = {
+            snow_mat.name: mesh.materials.find(snow_mat.name),
+            path_snow_mat.name: mesh.materials.find(path_snow_mat.name),
+        }
+        mesh_faces = 0
+        for poly in mesh.polygons:
+            original = mesh.materials[poly.material_index]
+            upward = (
+                poly.normal.z > 0.38
+                or (original is not None
+                    and original.name in roof_materials
+                    and abs(poly.normal.z) > 0.38)
+            )
+            if (upward
+                    and original is not None
+                    and original.name not in excluded_materials):
+                target_mat = path_snow_mat if original.name in path_materials else snow_mat
+                target_slot = snow_slots[target_mat.name]
+                if target_slot < 0:
+                    target_slot = len(mesh.materials)
+                    mesh.materials.append(target_mat)
+                    snow_slots[target_mat.name] = target_slot
+                poly.material_index = target_slot
+                mesh_faces += 1
+        if mesh_faces:
+            covered_meshes += 1
+            covered_faces += mesh_faces
+    log(f"Snow cover: meshes={covered_meshes}, upward_faces={covered_faces}")
+
+
 def setup_scene():
     scene = bpy.context.scene
     engine_items = scene.render.bl_rna.properties["engine"].enum_items.keys()
@@ -1498,7 +1587,7 @@ def setup_scene():
     scene.render.image_settings.color_mode = "RGBA"
     scene.render.image_settings.color_depth = "8"
     scene.view_settings.look = "AgX - Medium High Contrast"
-    scene.view_settings.exposure = 1.15 if DUSK_MODE else 0.0
+    scene.view_settings.exposure = 0.20 if SNOW_MODE else (1.15 if DUSK_MODE else 0.0)
     world = scene.world
     world.use_nodes = True
     nodes = world.node_tree.nodes
@@ -1507,22 +1596,36 @@ def setup_scene():
     sky = nodes.new("ShaderNodeTexSky")
     sky_items = sky.bl_rna.properties["sky_type"].enum_items.keys()
     sky.sky_type = "NISHITA" if "NISHITA" in sky_items else "SINGLE_SCATTERING"
-    sky.sun_elevation = math.radians(-2.0 if DUSK_MODE else 18)
-    sky.sun_rotation = math.radians(248 if DUSK_MODE else 215)
-    sky.altitude = 0.12 if DUSK_MODE else 0.18
-    sky.air_density = 1.45 if DUSK_MODE else 1.25
+    if SNOW_MODE:
+        sky.sun_elevation = math.radians(7.0)
+        sky.sun_rotation = math.radians(225)
+        sky.altitude = 0.08
+        sky.air_density = 1.65
+    else:
+        sky.sun_elevation = math.radians(-2.0 if DUSK_MODE else 18)
+        sky.sun_rotation = math.radians(248 if DUSK_MODE else 215)
+        sky.altitude = 0.12 if DUSK_MODE else 0.18
+        sky.air_density = 1.45 if DUSK_MODE else 1.25
     if hasattr(sky, "dust_density"):
-        sky.dust_density = 3.8 if DUSK_MODE else 2.2
+        sky.dust_density = 1.2 if SNOW_MODE else (3.8 if DUSK_MODE else 2.2)
     if hasattr(sky, "ground_albedo"):
-        sky.ground_albedo = 0.18 if DUSK_MODE else 0.45
-    bg.inputs["Strength"].default_value = 0.26 if DUSK_MODE else 0.38
+        sky.ground_albedo = 0.82 if SNOW_MODE else (0.18 if DUSK_MODE else 0.45)
+    bg.inputs["Strength"].default_value = 0.48 if SNOW_MODE else (0.26 if DUSK_MODE else 0.38)
     links.new(sky.outputs["Color"], bg.inputs["Color"])
 
-    sun_name = "Environment_Moonlight" if DUSK_MODE else "Environment_Sun"
+    sun_name = (
+        "Environment_WinterSun" if SNOW_MODE
+        else ("Environment_Moonlight" if DUSK_MODE else "Environment_Sun")
+    )
     sun_data = bpy.data.lights.new(sun_name, "SUN")
-    sun_data.energy = 1.30 if DUSK_MODE else 3.0
-    sun_data.color = (0.28, 0.42, 1.0) if DUSK_MODE else (1.0, 0.70, 0.45)
-    sun_data.angle = math.radians(11 if DUSK_MODE else 7)
+    if SNOW_MODE:
+        sun_data.energy = 2.15
+        sun_data.color = (0.66, 0.78, 1.0)
+        sun_data.angle = math.radians(12)
+    else:
+        sun_data.energy = 1.30 if DUSK_MODE else 3.0
+        sun_data.color = (0.28, 0.42, 1.0) if DUSK_MODE else (1.0, 0.70, 0.45)
+        sun_data.angle = math.radians(11 if DUSK_MODE else 7)
     sun = bpy.data.objects.new(sun_name, sun_data)
     COLLECTIONS["Environment"].objects.link(sun)
     sun.rotation_euler = (math.radians(43), math.radians(-22), math.radians(-32))
@@ -1550,7 +1653,13 @@ def render_views(cam):
     alley_loc = (street_x(-42) + 26.9, -42, 1.6)
     alley_tgt = (street_x(-4) + 26.9, -2, 4.2)
     gate_loc = (street_x(34) + 1.2, 34, 1.6)
-    if DUSK_MODE:
+    if SNOW_MODE:
+        views = {
+            "snow_overview_quarter": ((94, -104, 62), (0, 15, 10), 52),
+            "snow_main_street": (ms_loc, (ms_tgt[0], 55, 10), 32),
+            "snow_plaza": ((-14, 12, 1.6), (3, 27, 2.6), 34),
+        }
+    elif DUSK_MODE:
         views = {
             "dusk_main_street": (ms_loc, (ms_tgt[0], 65, 12), 32),
             "dusk_plaza": ((-14, 12, 1.6), (3, 27, 2.6), 34),
@@ -1568,7 +1677,7 @@ def render_views(cam):
             "wizard_fp": ((36.5, 13, 1.6), (40.5, 30, 15), 30),
             "approach_fp": ((-7, -161, 2.2), (1, -88, 15), 30),
         }
-    if TEST_MODE:
+    if TEST_MODE and not SNOW_MODE:
         if DUSK_MODE:
             views = {
                 "dusk_main_street": views["dusk_main_street"],
@@ -1631,6 +1740,49 @@ def render_turntable(cam):
     bpy.ops.render.render(animation=True)
 
 
+def render_walkthrough(cam):
+    """Eye-height dolly along the approach road and the curved main street:
+    bridge -> south gate -> main street -> plaza -> castle gate."""
+    scene = bpy.context.scene
+    scene.frame_start = 1
+    scene.frame_end = 24 if TEST_MODE else 600
+    scene.render.fps = 24
+    scene.render.fps_base = 1.0
+    scene.render.resolution_x = 640 if TEST_MODE else 1280
+    scene.render.resolution_y = 360 if TEST_MODE else 720
+    scene.render.resolution_percentage = 100
+    scene.render.image_settings.media_type = "VIDEO"
+    scene.render.image_settings.file_format = "FFMPEG"
+    scene.render.ffmpeg.format = "MPEG4"
+    scene.render.ffmpeg.codec = "H264"
+    scene.render.ffmpeg.constant_rate_factor = "MEDIUM"
+    scene.render.ffmpeg.ffmpeg_preset = "GOOD"
+    scene.render.filepath = str(RENDER_DIR / "walkthrough.mp4")
+
+    def path_x(y):
+        # The approach road south of the gate is straight on x=0; the street
+        # curve takes over exactly at the gate (street_x(-92) == 0).
+        return street_x(y) if y > STREET_Y0 else 0.0
+
+    y_start, y_end = -122.0, 78.0
+    frame_count = scene.frame_end - scene.frame_start + 1
+    for frame in range(scene.frame_start, scene.frame_end + 1):
+        t = (frame - scene.frame_start) / (frame_count - 1)
+        y = y_start + (y_end - y_start) * t
+        cam.location = (path_x(y), y, 2.5 if y < -108 else 1.75)
+        look_y = min(y + 20.0, 86.0)
+        target = Vector((path_x(look_y), look_y, 4.5))
+        direction = target - Vector(cam.location)
+        cam.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
+        cam.data.lens = 30
+        cam.keyframe_insert(data_path="location", frame=frame)
+        cam.keyframe_insert(data_path="rotation_euler", frame=frame)
+
+    scene.frame_set(scene.frame_start)
+    log(f"Rendering walkthrough: {frame_count} frames")
+    bpy.ops.render.render(animation=True)
+
+
 def export_scene():
     log("Exporting GLB")
     bpy.ops.export_scene.gltf(
@@ -1675,7 +1827,8 @@ def validate_and_report():
 def main():
     log(
         f"Starting seed={SEED}, test_mode={TEST_MODE}, dusk_mode={DUSK_MODE}, "
-        f"turntable_mode={TURNTABLE_MODE}, "
+        f"turntable_mode={TURNTABLE_MODE}, walkthrough_mode={WALKTHROUGH_MODE}, "
+        f"snow_mode={SNOW_MODE}, "
         f"Blender={bpy.app.version_string}"
     )
     build_streets_and_houses()
@@ -1688,16 +1841,23 @@ def main():
     make_market_and_props()
     make_green_space_props()
     make_trees_and_mountains()
+    apply_snow_cover()
     cam = setup_scene()
     validate_and_report()
-    if TURNTABLE_MODE:
+    if SNOW_MODE:
+        render_views(cam)
+    elif TURNTABLE_MODE:
         render_turntable(cam)
+    elif WALKTHROUGH_MODE:
+        render_walkthrough(cam)
     else:
         render_views(cam)
-    if (not TURNTABLE_MODE and not DUSK_MODE
+    if (not SNOW_MODE and not TURNTABLE_MODE and not WALKTHROUGH_MODE and not DUSK_MODE
             and (not TEST_MODE or os.environ.get("TOWN_TEST_EXPORT", "0") == "1")):
         export_scene()
-    if TURNTABLE_MODE:
+    if SNOW_MODE:
+        blend_name = "town_snow_test.blend" if TEST_MODE else "town_snow.blend"
+    elif TURNTABLE_MODE:
         blend_name = "town_turntable_test.blend" if TEST_MODE else "town_turntable.blend"
     elif DUSK_MODE:
         blend_name = "town_dusk_test.blend" if TEST_MODE else "town_dusk.blend"
