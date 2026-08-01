@@ -730,6 +730,75 @@ def make_house(name, cx, cy, width, depth, front_sign, style_seed, stone=False, 
            (chimney_w, chimney_w, roof_h + 1.2), MAT["stone"])
     mb.box((chimney_x, chimney_y, wall_h + roof_h * 1.22 + 0.05),
            (chimney_w + 0.18, chimney_w + 0.18, 0.16), MAT["stone2"])
+
+    # Sparse side/gable decoration pass. It is seeded independently so adding
+    # it never changes the established house shapes or facade details.
+    decor_r = random.Random(SEED * 31 + style_seed)
+    forced_decor = {
+        "House_Main_E_North_00": (-1, 0),  # prominent south gable: ivy
+        "House_Plaza_E_00": (-1, 2),       # tavern-side gable: trellis
+    }
+    if not narrow and (name in forced_decor or decor_r.random() < 0.27):
+        side = forced_decor[name][0] if name in forced_decor else (-1 if decor_r.random() < 0.5 else 1)
+        side_y = cy + side * (width / 2 + 0.07)
+        deco_x = cx + decor_r.uniform(-0.16, 0.16) * depth
+        variant = forced_decor[name][1] if name in forced_decor else decor_r.randrange(4)
+        if variant == 0:
+            # Branching climbing stems with irregular flat leaf clusters.
+            vine_top = min(wall_h * 0.78, 7.2)
+            mb.beam((deco_x, side_y, 0.65),
+                    (deco_x - 1.05, side_y, vine_top * 0.72),
+                    0.10, 0.10, MAT["wood"])
+            mb.beam((deco_x, side_y, 0.75),
+                    (deco_x + 1.15, side_y, vine_top),
+                    0.09, 0.10, MAT["wood"])
+            for k in range(11):
+                z = 0.95 + k * min(0.66, wall_h * 0.065)
+                x = deco_x + math.sin(k * 1.55) * (0.62 + k * 0.045)
+                mb.box((x, side_y + side * 0.025, z),
+                       (decor_r.uniform(0.58, 0.96), 0.09,
+                        decor_r.uniform(0.38, 0.62)), MAT["leaf"])
+                if k in (4, 7, 9):
+                    branch_side = -1 if k % 2 else 1
+                    mb.box((x + branch_side * 0.72, side_y + side * 0.03, z + 0.25),
+                           (decor_r.uniform(0.48, 0.78), 0.09,
+                            decor_r.uniform(0.34, 0.55)), MAT["leaf"])
+        elif variant == 1:
+            # Wall banner with a small gold rail and lower tail.
+            banner_z = min(wall_h - 1.6, max(3.1, wall_h * 0.60))
+            banner_mat = MAT["rose"] if decor_r.random() < 0.5 else MAT["ochre"]
+            mb.box((deco_x, side_y, banner_z), (1.55, 0.10, 2.65), banner_mat)
+            mb.box((deco_x, side_y + side * 0.03, banner_z + 1.42),
+                   (1.95, 0.13, 0.13), MAT["gold"])
+            mb.box((deco_x, side_y + side * 0.04, banner_z),
+                   (0.16, 0.13, 1.55), MAT["gold"])
+        elif variant == 2:
+            # Timber trellis, optionally beginning to green over.
+            trellis_z = min(wall_h - 1.6, max(2.8, wall_h * 0.48))
+            for ox in (-0.9, -0.3, 0.3, 0.9):
+                mb.box((deco_x + ox, side_y, trellis_z),
+                       (0.10, 0.10, 3.1), MAT["wood"])
+            for oz in (-1.2, -0.4, 0.4, 1.2):
+                mb.box((deco_x, side_y, trellis_z + oz),
+                       (2.15, 0.10, 0.10), MAT["wood"])
+            for ox, oz in ((-0.72, -0.65), (0.45, 0.15), (-0.15, 0.85)):
+                mb.box((deco_x + ox, side_y + side * 0.035, trellis_z + oz),
+                       (0.48, 0.09, 0.38), MAT["leaf"])
+        else:
+            # One small framed side window breaks an otherwise blank wall.
+            wz = min(wall_h - 1.45, max(2.8, wall_h * 0.58))
+            side_glass = (
+                MAT["glass_lit_soft"]
+                if (DUSK_MODE or SNOW_MODE) and decor_r.random() < 0.7
+                else MAT["glass"]
+            )
+            mb.box((deco_x, side_y, wz), (1.15, 0.10, 1.35), side_glass)
+            for ox in (-0.68, 0.68):
+                mb.box((deco_x + ox, side_y + side * 0.035, wz),
+                       (0.12, 0.12, 1.62), MAT["timber"])
+            for oz in (-0.78, 0.78):
+                mb.box((deco_x, side_y + side * 0.035, wz + oz),
+                       (1.48, 0.12, 0.12), MAT["timber"])
     mb.rotate_about(cx, cy, rot)
     return mb.object(name, COLLECTIONS["Town"])
 
@@ -798,8 +867,8 @@ def build_streets_and_houses():
         # The two EastLane rows face each other across a 3.75m alley;
         # narrow=True drops awnings/signs and shrinks jetties so the lane
         # stays walkable and visually clean.
-        ("EastLane_Outer", 33.0, -50, 16, 9, -1, 60, True),
-        ("EastLane_Inner", 21.05, -50, 16, 8.5, 1, 65, True),
+        ("EastLane_Outer", 33.0, -50, 9, 9, -1, 60, True),
+        ("EastLane_Inner", 21.05, -50, 9, 8.5, 1, 65, True),
         ("WestPerimeter", -57.0, -72, 69, 9, 1, 67),
         ("EastPerimeter", 57.0, -72, 69, 9, -1, 68),
     ]
@@ -810,7 +879,119 @@ def build_streets_and_houses():
 
     # Plaza perimeter: continuous facades facing the square.
     fill_row("Plaza_W", -34.5, 9, 42, 9, 1, 70)
-    fill_row("Plaza_E", 34.5, 9, 42, 9, -1, 80)
+    fill_row("Plaza_E", 34.5, 21, 42, 9, -1, 80)
+
+
+def make_tavern():
+    """A prominent three-storey inn anchoring the plaza's southeast corner."""
+    mb = MeshBuilder()
+    ty = 15.0
+    tx = street_x(ty) + 34.5
+    rot = street_rot(ty)
+    depth, width = 10.2, 12.0
+    floor_h, wall_h = 3.2, 9.6
+    front_x = tx - depth / 2
+
+    # Stone public floor and jettied plaster accommodation floors.
+    mb.box((tx, ty, floor_h / 2), (depth, width, floor_h), MAT["stone2"])
+    upper_cx = tx - 0.24
+    upper_depth = depth + 0.48
+    mb.box((upper_cx, ty, floor_h + (wall_h - floor_h) / 2),
+           (upper_depth, width + 0.25, wall_h - floor_h), MAT["cream2"])
+    upper_front = upper_cx - upper_depth / 2
+    mb.gable_roof(upper_cx, ty, wall_h, depth + 1.65, width + 1.0, 4.0, MAT["tile"])
+
+    # Plaza-facing half-timber grid with broad crossed braces.
+    for z in (floor_h + 0.08, floor_h * 2, wall_h - 0.18):
+        mb.box((upper_front - 0.10, ty, z), (0.22, width + 0.28, 0.22), MAT["timber"])
+    for y in (ty - width / 2 + 0.18, ty - 3.0, ty, ty + 3.0, ty + width / 2 - 0.18):
+        mb.box((upper_front - 0.10, y, 6.35), (0.22, 0.20, 6.0), MAT["timber"])
+    for y0, y1, reverse in ((ty - 5.7, ty - 3.2, False),
+                            (ty - 2.8, ty - 0.25, True),
+                            (ty + 0.25, ty + 2.8, False),
+                            (ty + 3.2, ty + 5.7, True)):
+        z0, z1 = (3.45, 6.15) if not reverse else (6.15, 3.45)
+        mb.beam((upper_front - 0.12, y0, z0),
+                (upper_front - 0.12, y1, z1), 0.17, 0.22, MAT["timber"])
+
+    tavern_rng = random.Random(SEED + 2201)
+
+    def window_material(index):
+        roll = tavern_rng.random()
+        if DUSK_MODE and roll < 0.88:
+            return MAT["glass_lit"] if index % 3 else MAT["glass_lit_soft"]
+        if SNOW_MODE and roll < 0.68:
+            return MAT["glass_lit_soft"]
+        return MAT["glass"]
+
+    # Upper guest-room windows and warm ground-floor taproom windows.
+    for floor, z in ((1, 4.85), (2, 8.0)):
+        for i, y in enumerate((ty - 4.25, ty - 2.1, ty, ty + 2.1, ty + 4.25)):
+            mat = window_material(floor * 10 + i)
+            mb.box((upper_front - 0.16, y, z), (0.12, 1.02, 1.30), mat)
+            for oy in (-0.59, 0.59):
+                mb.box((upper_front - 0.22, y + oy, z),
+                       (0.16, 0.12, 1.52), MAT["timber"])
+            for oz in (-0.75, 0.75):
+                mb.box((upper_front - 0.22, y, z + oz),
+                       (0.16, 1.30, 0.12), MAT["timber"])
+
+    door_y = ty + 0.25
+    mb.box((front_x - 0.08, door_y, 1.34), (0.18, 1.55, 2.68), MAT["wood"])
+    for y in (ty - 4.15, ty - 2.25, ty + 2.35, ty + 4.25):
+        mat = window_material(int(y * 10))
+        mb.box((front_x - 0.08, y, 1.62), (0.16, 1.12, 1.45), mat)
+        for oy in (-0.65, 0.65):
+            mb.box((front_x - 0.16, y + oy, 1.62),
+                   (0.15, 0.12, 1.68), MAT["timber"])
+        mb.box((front_x - 0.16, y, 0.82), (0.22, 1.42, 0.14), MAT["stone"])
+
+    # Entrance porch with deep roof and two stout timber posts.
+    porch_x = front_x - 1.35
+    mb.box((porch_x, door_y, 3.05), (2.8, 3.2, 0.18), MAT["green"])
+    for y in (door_y - 1.35, door_y + 1.35):
+        mb.box((front_x - 2.48, y, 1.55), (0.20, 0.20, 3.0), MAT["timber"])
+    mb.box((front_x - 1.30, door_y, 0.16), (2.8, 2.4, 0.26), MAT["stone2"])
+
+    # Perpendicular hanging sign: bracket, hangers, timber board and emblem.
+    sign_y = ty + 4.65
+    mb.box((front_x - 0.88, sign_y, 4.15), (1.75, 0.13, 0.13), MAT["iron"])
+    mb.box((front_x - 1.55, sign_y, 3.78), (0.12, 0.13, 0.78), MAT["iron"])
+    mb.box((front_x - 1.55, sign_y, 3.25), (1.25, 0.18, 0.90), MAT["wood"])
+    mb.cylinder((front_x - 1.55, sign_y - 0.12, 3.25),
+                0.24, 0.10, MAT["gold"], 10, axis="Y")
+
+    # Two chimneys with cap stones make the inn read as a busy kitchen.
+    for y in (ty - 3.4, ty + 3.35):
+        mb.box((tx + 1.7, y, 11.65), (0.72, 0.72, 4.5), MAT["stone"])
+        mb.box((tx + 1.7, y, 13.92), (0.95, 0.95, 0.18), MAT["stone2"])
+
+    # Outdoor drinking area kept tight to the facade and clear of the fountain.
+    for y in (ty - 3.0, ty + 3.5):
+        table_x = front_x - 2.75
+        mb.cylinder((table_x, y, 0.80), 0.72, 0.16, MAT["wood"], 12)
+        mb.cylinder((table_x, y, 0.42), 0.12, 0.76, MAT["timber"], 8)
+        for oy in (-1.05, 1.05):
+            mb.box((table_x, y + oy, 0.48), (1.45, 0.38, 0.16), MAT["wood"])
+            mb.box((table_x, y + oy, 0.24), (1.15, 0.16, 0.42), MAT["timber"])
+    barrel_x, barrel_y = front_x - 2.65, ty + 0.35
+    mb.cylinder((barrel_x, barrel_y, 0.58), 0.54, 1.10, MAT["wood"], 10)
+    for z in (0.18, 0.58, 0.98):
+        mb.cylinder((barrel_x, barrel_y, z), 0.56, 0.08, MAT["iron"], 10)
+
+    mb.rotate_about(tx, ty, rot)
+    mb.object("Landmark_Tavern", COLLECTIONS["Town"])
+
+    if DUSK_MODE:
+        c, s = math.cos(rot), math.sin(rot)
+        for i, local_y in enumerate((door_y - 1.15, door_y + 1.15)):
+            lx, ly = front_x - 1.0, local_y
+            dx, dy = lx - tx, ly - ty
+            add_point_light(
+                f"Prop_TavernPorchLamp_{i}",
+                (tx + dx * c - dy * s, ty + dx * s + dy * c, 2.65),
+                energy=360.0, radius=0.8,
+            )
 
 def add_cobbles():
     mb = MeshBuilder()
@@ -1084,6 +1265,67 @@ def make_outskirts():
     # Farmhouses flanking the road.
     make_house("House_Farm_A", -13, -117.5, 8.5, 7, 1, 9101)
     make_house("House_Farm_B", 14, -145, 9.0, 7.5, -1, 9102)
+
+    make_harbor()
+
+
+def make_harbor():
+    """Small river port SE of the gate: dirt path, quay, piers, boats,
+    a warehouse and a loading crane."""
+    mb = MeshBuilder()
+    # Dirt path from the approach road to the quay.
+    mb.box((21, -102.5, 0.015), (38, 3.4, 0.09), MAT["soil"])
+    # Stone quay along the north bank.
+    mb.box((47, -107.2, 0.35), (30, 4.0, 0.9), MAT["stone2"])
+    for bx in range(34, 61, 4):
+        mb.cylinder((bx, -105.4, 0.95), 0.16, 0.9, MAT["timber"], 8)
+    # Two timber piers reaching into the river.
+    for px in (40, 54):
+        mb.box((px, -113.5, 0.42), (2.2, 9.5, 0.18), MAT["wood"])
+        for py in (-117.6, -113.5, -109.6):
+            for sx in (-0.95, 0.95):
+                mb.cylinder((px + sx, py, -0.1), 0.14, 1.6, MAT["timber"], 8)
+    # Rowboat beside the west pier: flat bottom, flared side planks, thwarts.
+    bx, by = 36.6, -114.5
+    mb.box((bx, by, 0.06), (1.3, 3.4, 0.16), MAT["wood"])
+    for sx in (-1, 1):
+        mb.box((bx + sx * 0.75, by, 0.28), (0.14, 3.6, 0.34), MAT["wood"], rot=0)
+    for oy in (-1.75, 1.75):
+        mb.box((bx, by + oy, 0.28), (1.35, 0.16, 0.34), MAT["wood"], rot=0)
+    for oy in (-0.8, 0.5):
+        mb.box((bx, by + oy, 0.3), (1.2, 0.3, 0.08), MAT["timber"])
+    # Cargo barge with a mast and furled sail at the east pier.
+    gx, gy = 57.5, -114.8
+    mb.box((gx, gy, 0.22), (3.0, 7.5, 0.5), MAT["wood"])
+    for sx in (-1, 1):
+        mb.box((gx + sx * 1.55, gy, 0.62), (0.18, 7.8, 0.75), MAT["wood"])
+    for oy in (-3.85, 3.85):
+        mb.box((gx, gy + oy, 0.62), (3.1, 0.2, 0.75), MAT["wood"])
+    mb.cylinder((gx, gy - 1.2, 3.4), 0.16, 6.0, MAT["timber"], 8)
+    mb.box((gx, gy - 1.2, 5.6), (3.6, 0.14, 0.14), MAT["timber"])
+    mb.box((gx, gy - 1.2, 5.15), (3.2, 0.3, 0.7), MAT["cream2"])
+    for k in range(3):
+        mb.box((gx - 0.7 + k * 0.7, gy + 1.4, 0.75), (0.62, 0.62, 0.6), MAT["wood"], 0.3 * k)
+    # Warehouse on the quay.
+    mb.box((46, -101.5, 2.4), (12, 7.5, 4.8), MAT["stone2"])
+    mb.gable_roof(46, -101.5, 4.8, 13.4, 8.3, 2.6, MAT["slate"])
+    mb.box((41.5, -105.05, 1.5), (2.6, 0.2, 3.0), MAT["wood"])
+    mb.box((50.5, -105.05, 1.5), (2.6, 0.2, 3.0), MAT["timber"])
+    # Loading crane: post, angled jib, rope and hanging crate.
+    mb.cylinder((59, -106.5, 2.6), 0.3, 5.2, MAT["timber"], 8)
+    mb.beam((59, -106.5, 4.9), (59, -111.5, 3.4), 0.26, 0.26, MAT["timber"])
+    mb.box((59, -111.5, 2.4), (0.05, 0.05, 2.1), MAT["iron"])
+    mb.box((59, -111.5, 1.05), (0.75, 0.75, 0.7), MAT["wood"], 0.4)
+    # Barrels and crates on the quay.
+    hr = random.Random(SEED + 151)
+    for _ in range(7):
+        ox, oy = hr.uniform(36, 58), hr.uniform(-108.6, -106.2)
+        if hr.random() < 0.5:
+            mb.cylinder((ox, oy, 1.3), 0.42, 1.0, MAT["wood"], 10)
+        else:
+            s = hr.uniform(0.55, 0.8)
+            mb.box((ox, oy, 0.8 + s / 2), (s, s, s), MAT["wood"], hr.uniform(0, 1.5))
+    mb.object("Prop_RiverHarbor", COLLECTIONS["Props"])
 
 
 def make_landmarks():
@@ -1676,6 +1918,8 @@ def render_views(cam):
             "church_fp": ((-56, 42, 1.6), (-25, 64, 13), 27),
             "wizard_fp": ((36.5, 13, 1.6), (40.5, 30, 15), 30),
             "approach_fp": ((-7, -161, 2.2), (1, -88, 15), 30),
+            "harbor_fp": ((28, -117, 1.8), (52, -107, 3.5), 30),
+            "tavern_fp": ((2, 22, 1.8), (29.0, 15.0, 6.2), 36),
         }
     if TEST_MODE and not SNOW_MODE:
         if DUSK_MODE:
@@ -1688,6 +1932,7 @@ def render_views(cam):
                 "main_street_fp": views["main_street_fp"],
                 "castle_gate_fp": views["castle_gate_fp"],
                 "overview": views["overview"],
+                "tavern_fp": views["tavern_fp"],
             }
     for name, (loc, target, lens) in views.items():
         log(f"Rendering {name}")
@@ -1832,6 +2077,7 @@ def main():
         f"Blender={bpy.app.version_string}"
     )
     build_streets_and_houses()
+    make_tavern()
     add_cobbles()
     make_castle()
     make_castle_inner_details()
