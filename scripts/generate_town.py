@@ -269,6 +269,11 @@ MAT = {
         emission=(1.0, 0.22, 0.035),
         emission_strength=9.0 if DUSK_MODE else 2.5,
     ),
+    "crystal": material(
+        "MAT_ArcaneCrystal", (0.055, 0.42, 0.54), 0.24,
+        emission=(0.035, 0.75, 1.0),
+        emission_strength=8.0 if DUSK_MODE else 4.0,
+    ),
     "mountain": unlit_material(
         "MAT_DistantMountainHaze",
         (0.10, 0.14, 0.22) if DUSK_MODE else (0.52, 0.64, 0.74),
@@ -397,6 +402,25 @@ class MeshBuilder:
         for i in range(segments):
             j = (i + 1) % segments
             self.faces.append((start + i, start + j, start + segments + j, start + segments + i))
+            self.mat_ids.append(MAT_INDEX[mat.name])
+        self.faces.append(tuple(start + i for i in reversed(range(segments))))
+        self.mat_ids.append(MAT_INDEX[mat.name])
+        self.faces.append(tuple(start + segments + i for i in range(segments)))
+        self.mat_ids.append(MAT_INDEX[mat.name])
+
+    def frustum(self, center_xy, base_z, bottom_radius, top_radius, height, mat, segments=16):
+        """Capped vertical frustum, used where stacked cylinders look too blocky."""
+        cx, cy = center_xy
+        start = len(self.vertices)
+        for z, radius in ((base_z, bottom_radius), (base_z + height, top_radius)):
+            for i in range(segments):
+                a = math.tau * i / segments
+                self.vertices.append((cx + radius * math.cos(a),
+                                      cy + radius * math.sin(a), z))
+        for i in range(segments):
+            j = (i + 1) % segments
+            self.faces.append((start + i, start + j,
+                               start + segments + j, start + segments + i))
             self.mat_ids.append(MAT_INDEX[mat.name])
         self.faces.append(tuple(start + i for i in reversed(range(segments))))
         self.mat_ids.append(MAT_INDEX[mat.name])
@@ -904,6 +928,142 @@ def make_castle():
             )
 
 
+def make_landmarks():
+    """Secondary landmarks below the castle's dominant 61m keep."""
+    mb = MeshBuilder()
+
+    # --- Church: nave along X, bell tower on the street-facing east end.
+    cx, cy = -34.0, 64.0
+    nave_w, nave_l, wall_h = 10.0, 15.0, 7.0
+    # Cream nave with stone trim so the church reads separately from the
+    # all-stone castle right behind it.
+    mb.box((cx - 1.5, cy, wall_h / 2), (nave_l, nave_w, wall_h), MAT["cream2"])
+    mb.gable_roof(cx - 1.5, cy, wall_h, nave_l + 1.4, nave_w + 1.0, 3.6, MAT["slate"])
+    # Buttresses and tall windows along both nave sides.
+    for i in range(4):
+        bx = cx - 7.0 + i * 3.7
+        for sy in (-1, 1):
+            yb = cy + sy * (nave_w / 2 + 0.35)
+            mb.box((bx, yb, 2.6), (0.8, 0.9, 5.2), MAT["stone"])
+            mb.box((bx + 1.85, cy + sy * (nave_w / 2 + 0.06), 3.6), (1.1, 0.14, 3.4), MAT["glass"])
+            mb.box((bx + 1.85, cy + sy * (nave_w / 2 + 0.10), 3.6), (1.34, 0.10, 3.6), MAT["stone"])
+    # Apse (west end).
+    mb.cylinder((cx - 9.5, cy, 2.75), 4.2, 5.5, MAT["stone2"], 12)
+    mb.cone((cx - 9.5, cy), 5.5, 4.5, 2.6, MAT["slate"], 12)
+    # Bell tower (east end): shaft, belfry openings, spire and gold cross.
+    tx = cx + 8.6
+    mb.box((tx, cy, 12.0), (4.6, 4.6, 24.0), MAT["stone2"])
+    for ox, oy in ((0, 1), (0, -1), (1, 0), (-1, 0)):
+        for off in (-0.62, 0.62):
+            mb.box((tx + ox * 2.35 + (0 if ox else off), cy + oy * 2.35 + (0 if oy else off), 21.0),
+                   (0.45 if ox else 0.85, 0.45 if oy else 0.85, 2.2), MAT["iron"])
+    mb.box((tx, cy, 24.4), (5.4, 5.4, 0.8), MAT["stone"])
+    mb.cone((tx, cy), 24.8, 3.6, 6.5, MAT["green"], 8)
+    mb.box((tx, cy, 32.2), (0.18, 0.18, 1.9), MAT["gold"])
+    mb.box((tx, cy, 32.5), (0.18, 0.95, 0.18), MAT["gold"])
+    # Arched entrance porch facing the town.
+    mb.box((tx + 2.5, cy, 1.7), (0.7, 2.6, 3.4), MAT["wood"])
+    mb.box((tx + 2.62, cy, 3.6), (0.6, 3.2, 0.5), MAT["stone"])
+    mb.object("Landmark_Church", COLLECTIONS["Town"])
+
+    # --- Clock tower at the plaza NE corner.
+    mb = MeshBuilder()
+    qx, qy = 27.5, 46.5
+    mb.box((qx, qy, 10.0), (5.0, 5.0, 20.0), MAT["stone2"])
+    mb.box((qx, qy, 20.7), (5.8, 5.8, 1.4), MAT["stone"])
+    for ox, oy, rot in ((0, -1, 0.0), (-1, 0, math.pi / 2)):
+        fx, fy = qx + ox * 2.56, qy + oy * 2.56
+        mb.cylinder((fx, fy, 17.5), 1.55, 0.18, MAT["cream2"], 16, axis="X" if ox else "Y")
+        mb.cylinder((fx + ox * 0.06, fy + oy * 0.06, 17.5), 0.16, 0.1,
+                    MAT["gold"], 8, axis="X" if ox else "Y")
+        # Hands: minute up, hour angled.
+        mb.box((fx + ox * 0.12, fy + oy * 0.12, 18.05), (0.1, 0.12, 1.1), MAT["iron"])
+        mb.box((fx + ox * 0.12, fy + oy * 0.12 + (0.35 if ox else 0), 17.62),
+               (0.1, 0.75 if ox else 0.12, 0.12 if ox else 0.75), MAT["iron"])
+    mb.hip_roof(qx, qy, 21.4, 5.6, 5.6, 3.2, MAT["green"])
+    mb.box((qx, qy, 25.2), (0.16, 0.16, 1.4), MAT["gold"])
+    for wx, wy in ((-1.6, -1.6), (1.6, -1.6), (-1.6, 1.6), (1.6, 1.6)):
+        mb.box((qx + wx, qy + wy, 21.9), (0.5, 0.5, 1.6), MAT["stone2"])
+    for z in (4.0, 9.0, 13.5):
+        mb.box((qx, qy - 2.53, z), (1.0, 0.16, 1.8), MAT["glass"])
+    mb.box((qx, qy - 2.56, 1.35), (1.4, 0.2, 2.7), MAT["wood"])
+    mb.object("Landmark_ClockTower", COLLECTIONS["Town"])
+
+    # --- Wizard tower: squeezed into the east lawn between Plaza_E and the
+    # outer road. Its tapered shaft and oversized observatory crown keep the
+    # silhouette fanciful without competing with the castle keep.
+    mb = MeshBuilder()
+    wx, wy = 39.0, 30.5
+    shaft_h, base_r, neck_r = 19.4, 2.85, 2.05
+    mb.frustum((wx, wy), 0.08, base_r, neck_r, shaft_h, MAT["stone2"], 18)
+    # Uneven masonry bands articulate the tall shaft at street-view distance.
+    for z, radius in ((0.45, 2.94), (6.4, 2.67), (12.8, 2.38), (19.35, 2.20)):
+        mb.cylinder((wx, wy, z), radius, 0.34, MAT["stone"], 18)
+
+    # Spiral windows follow the taper. The thin local X dimension is radial.
+    for i, z in enumerate((3.6, 6.2, 8.8, 11.4, 14.0, 16.6)):
+        angle = math.radians(25 + i * 67)
+        radius = base_r + (neck_r - base_r) * (z / shaft_h) + 0.02
+        px, py = wx + math.cos(angle) * radius, wy + math.sin(angle) * radius
+        mb.box((px, py, z), (0.18, 0.72, 1.30), MAT["glass"], rot=angle)
+        # Small stone sill sits proud of each inset opening.
+        mb.box((px + math.cos(angle) * 0.09, py + math.sin(angle) * 0.09, z - 0.74),
+               (0.30, 0.96, 0.18), MAT["stone"], rot=angle)
+
+    # West-facing door opens toward the plaza rather than the perimeter road.
+    mb.box((wx - base_r - 0.04, wy, 1.45), (0.20, 1.34, 2.75),
+           MAT["wood"], rot=math.pi)
+    mb.box((wx - base_r - 0.15, wy, 2.95), (0.30, 1.72, 0.30),
+           MAT["stone"], rot=math.pi)
+
+    # Corbelled, projecting observatory and conical roof.
+    for a in range(0, 360, 30):
+        angle = math.radians(a)
+        mb.box((wx + 2.55 * math.cos(angle), wy + 2.55 * math.sin(angle), 19.72),
+               (1.10, 0.58, 1.05), MAT["stone"], rot=angle)
+    mb.cylinder((wx, wy, 20.10), 3.48, 0.72, MAT["stone"], 18)
+    mb.cylinder((wx, wy, 22.10), 3.15, 3.85, MAT["ochre"], 18)
+    mb.cylinder((wx, wy, 24.10), 3.48, 0.35, MAT["timber"], 18)
+    for angle in (0.0, math.pi / 2, math.pi, 3 * math.pi / 2):
+        px, py = wx + 3.16 * math.cos(angle), wy + 3.16 * math.sin(angle)
+        mb.box((px, py, 22.15), (0.18, 0.92, 1.55), MAT["glass"], rot=angle)
+        mb.box((px + math.cos(angle) * 0.08, py + math.sin(angle) * 0.08, 21.27),
+               (0.28, 1.12, 0.18), MAT["timber"], rot=angle)
+    mb.cone((wx, wy), 24.28, 3.86, 4.65, MAT["green"], 18)
+
+    # Faceted, double-ended emissive crystal on a compact metal setting.
+    mb.cylinder((wx, wy, 29.08), 0.55, 0.34, MAT["gold"], 8)
+    ring_start = len(mb.vertices)
+    crystal_ring_z, crystal_r, crystal_segments = 30.0, 0.48, 6
+    for i in range(crystal_segments):
+        a = math.tau * i / crystal_segments
+        mb.vertices.append((wx + crystal_r * math.cos(a),
+                            wy + crystal_r * math.sin(a), crystal_ring_z))
+    bottom_i = len(mb.vertices)
+    mb.vertices.append((wx, wy, 29.20))
+    top_i = len(mb.vertices)
+    mb.vertices.append((wx, wy, 31.55))
+    for i in range(crystal_segments):
+        j = (i + 1) % crystal_segments
+        mb.faces.extend(((ring_start + j, ring_start + i, bottom_i),
+                         (ring_start + i, ring_start + j, top_i)))
+        mb.mat_ids.extend((MAT_INDEX[MAT["crystal"].name],) * 2)
+
+    # A few domestic details keep the landmark grounded rather than isolated.
+    for py in (wy - 0.95, wy + 0.95):
+        mb.cylinder((wx - 3.22, py, 0.32), 0.34, 0.54, MAT["tile"], 8)
+        mb.sphere((wx - 3.22, py, 0.78), 0.42, MAT["leaf"], 8, 4)
+    for row in range(2):
+        for col in range(3):
+            mb.cylinder((wx - 0.52 + col * 0.52, wy - 3.03, 0.32 + row * 0.43),
+                        0.21, 1.20, MAT["wood"], 8, axis="Y")
+    mb.object("Landmark_WizardTower", COLLECTIONS["Town"])
+    add_point_light(
+        "Prop_WizardCrystalGlow", (wx, wy, 30.25),
+        energy=520.0, color=(0.04, 0.55, 1.0), radius=1.8,
+    )
+
+
 def make_walls():
     mb = MeshBuilder()
     # A tighter ring keeps the interior urban rather than park-like.
@@ -1032,6 +1192,87 @@ def make_market_and_props():
                 f"Prop_MarketLamp_{i:02d}", (x, y, 2.34),
                 energy=280.0, radius=0.85,
             )
+
+
+def make_green_space_props():
+    """Low-rise food and work areas filling the otherwise uniform forecourt."""
+    # Walled kitchen garden in the NW castle forecourt, beyond the final
+    # building row and clear of the west perimeter road.
+    mb = MeshBuilder()
+    gx, gy = -56.0, 81.0
+    mb.box((gx, gy, 0.10), (15.5, 8.8, 0.20), MAT["soil"])
+    crop_rng = random.Random(SEED + 1801)
+    for row in range(6):
+        x = gx - 6.25 + row * 2.5
+        mb.box((x, gy, 0.24), (1.15, 7.35, 0.28), MAT["soil"])
+        for plant in range(6):
+            y = gy - 2.95 + plant * 1.18
+            height = crop_rng.uniform(0.42, 0.68)
+            mb.cylinder((x, y, 0.30 + height / 2), 0.07, height,
+                        MAT["wood"], 6)
+            mb.sphere((x, y, 0.52 + height), crop_rng.uniform(0.20, 0.29),
+                      MAT["leaf"], 7, 4)
+
+    # Fence has an east-side gate facing the open forecourt.
+    for x in range(-64, -47, 3):
+        for y in (76.35, 85.65):
+            mb.box((x, y, 0.72), (0.16, 0.16, 1.42), MAT["timber"])
+    for y in (77.0, 79.5, 82.5, 85.0):
+        mb.box((-63.85, y, 0.72), (0.16, 0.16, 1.42), MAT["timber"])
+        if not 80.0 < y < 82.0:
+            mb.box((-48.15, y, 0.72), (0.16, 0.16, 1.42), MAT["timber"])
+    for y in (76.35, 85.65):
+        for z in (0.48, 0.98):
+            mb.box((gx, y, z), (15.8, 0.12, 0.12), MAT["wood"])
+    for x in (-63.85, -48.15):
+        for z in (0.48, 0.98):
+            # Leave a 2m opening on the garden's east edge.
+            if x > -50:
+                for yy in (78.4, 83.8):
+                    mb.box((x, yy, z), (0.12, 3.0, 0.12), MAT["wood"])
+            else:
+                mb.box((x, gy, z), (0.12, 8.7, 0.12), MAT["wood"])
+    mb.object("Ground_CastleForecourtKitchenGarden", COLLECTIONS["Ground"])
+
+    # East forecourt orchard, work shed, firewood and material stacks.
+    mb = MeshBuilder()
+    orchard_rng = random.Random(SEED + 1802)
+    orchard = ((44.0, 76.0), (48.0, 85.0), (58.0, 85.5),
+               (67.0, 76.5), (68.0, 86.0))
+    for i, (x, y) in enumerate(orchard):
+        trunk_h = orchard_rng.uniform(2.5, 3.2)
+        mb.cylinder((x, y, trunk_h / 2), orchard_rng.uniform(0.28, 0.38),
+                    trunk_h, MAT["wood"], 8)
+        mb.sphere((x, y, trunk_h + 1.25), orchard_rng.uniform(1.55, 1.85),
+                  MAT["leaf"], 9, 5)
+        mb.sphere((x - 0.75, y + 0.35, trunk_h + 0.75), 1.05,
+                  MAT["leaf"], 8, 4)
+        for fruit in range(3):
+            a = math.tau * (fruit / 3.0) + i * 0.37
+            mb.sphere((x + 1.25 * math.cos(a), y + 1.25 * math.sin(a),
+                       trunk_h + 1.10 + 0.28 * fruit),
+                      0.14, MAT["ochre"], 6, 3)
+
+    sx, sy = 57.0, 73.0
+    mb.box((sx, sy, 1.65), (7.0, 5.0, 3.3), MAT["ochre"])
+    mb.gable_roof(sx, sy, 3.3, 7.8, 5.8, 2.2, MAT["tile"])
+    for x in (sx - 3.15, sx + 3.15):
+        mb.box((x, sy - 2.54, 1.65), (0.30, 0.20, 3.3), MAT["timber"])
+    mb.box((sx, sy - 2.55, 1.25), (1.35, 0.18, 2.5), MAT["wood"])
+    mb.box((sx - 2.1, sy - 2.55, 1.75), (1.05, 0.16, 1.05), MAT["glass"])
+    # Logs and covered material stacks at the shed's west side.
+    for row in range(3):
+        for col in range(4):
+            mb.cylinder((51.2 + col * 0.48, 73.0, 0.28 + row * 0.45),
+                        0.20, 1.65, MAT["wood"], 8, axis="Y")
+    for x, y, size in ((64.0, 71.5, 1.0), (65.1, 72.0, 0.8), (64.4, 73.0, 0.9)):
+        mb.box((x, y, size / 2 + 0.06), (size, size, size), MAT["wood"], 0.18)
+    # Short boundary fence loosely ties shed and orchard into one work yard.
+    for x in range(42, 71, 4):
+        mb.box((x, 89.0, 0.72), (0.16, 0.16, 1.42), MAT["timber"])
+    for z in (0.48, 0.98):
+        mb.box((56.0, 89.0, z), (28.0, 0.12, 0.12), MAT["wood"])
+    mb.object("Prop_CastleForecourtOrchardAndYard", COLLECTIONS["Props"])
 
 
 def make_trees_and_mountains():
@@ -1196,6 +1437,8 @@ def render_views(cam):
             "plaza_fp": ((-14, 12, 1.6), (3, 27, 2.6), 34),
             "castle_gate_fp": (gate_loc, (0.5, 89, 9.5), 32),
             "alley_fp": (alley_loc, alley_tgt, 35),
+            "church_fp": ((-56, 42, 1.6), (-25, 64, 13), 27),
+            "wizard_fp": ((36.5, 13, 1.6), (40.5, 30, 15), 30),
         }
     if TEST_MODE:
         if DUSK_MODE:
@@ -1265,8 +1508,10 @@ def main():
     build_streets_and_houses()
     add_cobbles()
     make_castle()
+    make_landmarks()
     make_walls()
     make_market_and_props()
+    make_green_space_props()
     make_trees_and_mountains()
     cam = setup_scene()
     validate_and_report()
