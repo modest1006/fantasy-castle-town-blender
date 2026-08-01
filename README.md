@@ -22,6 +22,12 @@ Unity 等のゲームエンジンで「歩ける街」として使うことを�
 |---|---|
 | ![overview](renders/overview.png) | ![quarter](renders/overview_quarter.png) |
 
+### 夕暮れモード (`TOWN_DUSK=1`)
+
+| 大通り | 俯瞰 |
+|---|---|
+| ![dusk street](renders/dusk_main_street.png) | ![dusk quarter](renders/dusk_overview_quarter.png) |
+
 ## 実行方法
 
 ```bash

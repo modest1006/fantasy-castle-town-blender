@@ -21,6 +21,7 @@ from pathlib import Path
 SEED = 517042
 RNG = random.Random(SEED)
 TEST_MODE = os.environ.get("TOWN_TEST", "0") == "1"
+DUSK_MODE = os.environ.get("TOWN_DUSK", "0") == "1"
 ROOT = Path(__file__).resolve().parent.parent
 RENDER_DIR = ROOT / "renders"
 EXPORT_DIR = ROOT / "export"
@@ -184,7 +185,15 @@ def generate_textures():
 TEXTURES = generate_textures()
 
 
-def material(name, color, roughness=0.75, metallic=0.0, emission=None, texture=None):
+def material(
+    name,
+    color,
+    roughness=0.75,
+    metallic=0.0,
+    emission=None,
+    emission_strength=2.5,
+    texture=None,
+):
     mat = bpy.data.materials.new(name)
     mat.diffuse_color = (*color, 1.0)
     mat.use_nodes = True
@@ -204,7 +213,7 @@ def material(name, color, roughness=0.75, metallic=0.0, emission=None, texture=N
     if emission:
         if "Emission Color" in bsdf.inputs:
             bsdf.inputs["Emission Color"].default_value = (*emission, 1.0)
-            bsdf.inputs["Emission Strength"].default_value = 2.5
+            bsdf.inputs["Emission Strength"].default_value = emission_strength
         else:
             bsdf.inputs["Emission"].default_value = (*emission, 1.0)
     return mat
@@ -233,10 +242,19 @@ MAT = {
     "wood": material("MAT_Wood", (0.28, 0.12, 0.045), 0.72, texture="wood"),
     "stone": material("MAT_Stone", (0.31, 0.32, 0.30), 0.91, texture="stone"),
     "stone2": material("MAT_LightStone", (0.46, 0.45, 0.40), 0.9, texture="stone"),
+    "tunnel": material("MAT_TunnelStone", (0.055, 0.060, 0.065), 0.96),
     "slate": material("MAT_SlateRoof", (0.095, 0.12, 0.14), 0.83, texture="roof_slate"),
     "tile": material("MAT_Terracotta", (0.43, 0.105, 0.045), 0.82, texture="roof_tile"),
     "green": material("MAT_DeepGreen", (0.055, 0.15, 0.095), 0.82, texture="roof_green"),
     "glass": material("MAT_WindowBlue", (0.07, 0.16, 0.20), 0.42, metallic=0.08),
+    "glass_lit": material(
+        "MAT_WindowGlowAmber", (0.64, 0.25, 0.055), 0.48,
+        emission=(1.0, 0.22, 0.025), emission_strength=5.5,
+    ),
+    "glass_lit_soft": material(
+        "MAT_WindowGlowGold", (0.58, 0.31, 0.09), 0.52,
+        emission=(1.0, 0.38, 0.07), emission_strength=3.8,
+    ),
     "gold": material("MAT_Gold", (0.72, 0.42, 0.08), 0.3, metallic=0.55),
     "road": material("MAT_Cobble", (0.24, 0.255, 0.25), 0.96, texture="cobble"),
     "road2": material("MAT_CobbleLight", (0.34, 0.34, 0.31), 0.96, texture="cobble"),
@@ -245,13 +263,44 @@ MAT = {
     "leaf": material("MAT_Leaves", (0.075, 0.21, 0.075), 0.92),
     "water": material("MAT_Water", (0.06, 0.25, 0.31), 0.25, metallic=0.1),
     "iron": material("MAT_Iron", (0.035, 0.04, 0.04), 0.42, metallic=0.72),
-    "light": material("MAT_LanternGlow", (1.0, 0.43, 0.08), 0.35, emission=(1.0, 0.22, 0.035)),
-    "mountain": unlit_material("MAT_DistantMountainHaze", (0.52, 0.64, 0.74)),
-    "snow": unlit_material("MAT_SnowCaps", (0.82, 0.88, 0.91)),
-    "horizon": unlit_material("MAT_HorizonMist", (0.58, 0.69, 0.78)),
+    "gate_iron": material("MAT_GateIron", (0.13, 0.14, 0.145), 0.38, metallic=0.64),
+    "light": material(
+        "MAT_LanternGlow", (1.0, 0.43, 0.08), 0.35,
+        emission=(1.0, 0.22, 0.035),
+        emission_strength=9.0 if DUSK_MODE else 2.5,
+    ),
+    "mountain": unlit_material(
+        "MAT_DistantMountainHaze",
+        (0.10, 0.14, 0.22) if DUSK_MODE else (0.52, 0.64, 0.74),
+    ),
+    "snow": unlit_material(
+        "MAT_SnowCaps",
+        (0.34, 0.39, 0.50) if DUSK_MODE else (0.82, 0.88, 0.91),
+    ),
+    "horizon": unlit_material(
+        "MAT_HorizonMist",
+        (0.16, 0.22, 0.34) if DUSK_MODE else (0.58, 0.69, 0.78),
+    ),
 }
 ALL_MATERIALS = list(MAT.values())
 MAT_INDEX = {m.name: i for i, m in enumerate(ALL_MATERIALS)}
+
+
+def add_point_light(name, location, energy=320.0, color=(1.0, 0.28, 0.055), radius=1.0):
+    """Create a dusk-only practical light without context-dependent operators."""
+    if not DUSK_MODE:
+        return None
+    data = bpy.data.lights.new(name + "_Data", "POINT")
+    data.energy = energy
+    data.color = color
+    data.shadow_soft_size = radius
+    # Practical bulbs sit inside deliberately simple closed lantern meshes.
+    # Disabling their own shadows prevents the casing from trapping all light.
+    data.use_shadow = False
+    obj = bpy.data.objects.new(name, data)
+    obj.location = location
+    COLLECTIONS["Props"].objects.link(obj)
+    return obj
 
 
 class MeshBuilder:
@@ -427,10 +476,20 @@ class MeshBuilder:
 
 def make_house(name, cx, cy, width, depth, front_sign, style_seed, stone=False, narrow=False):
     r = random.Random(style_seed)
+    light_r = random.Random(SEED * 17 + style_seed)
     mb = MeshBuilder()
     floors = r.choice((2, 2, 3, 3, 4))
     floor_h = r.uniform(2.75, 3.15)
     wall_h = floors * floor_h
+    floor_lights = []
+    for fl in range(floors):
+        chance = 0.34 if fl == 0 else (0.52 if fl == floors - 1 else 0.68)
+        if DUSK_MODE and light_r.random() < chance:
+            floor_lights.append(
+                MAT["glass_lit"] if light_r.random() < 0.58 else MAT["glass_lit_soft"]
+            )
+        else:
+            floor_lights.append(None)
     facade_x = cx + front_sign * depth / 2
     wall_mat = MAT["stone2"] if stone else r.choice((MAT["cream"], MAT["cream2"], MAT["ochre"], MAT["rose"]))
     roof_mat = r.choice((MAT["tile"], MAT["slate"], MAT["green"]))
@@ -470,7 +529,9 @@ def make_house(name, cx, cy, width, depth, front_sign, style_seed, stone=False, 
             base_z = slope_z(x_front) - 0.35
             dx = x_front - front_sign * 0.45
             mb.box((dx, dy, base_z + 0.55), (1.15, 1.2, 1.1), wall_mat)
-            mb.box((x_front + front_sign * 0.13, dy, base_z + 0.62), (0.06, 0.62, 0.68), MAT["glass"])
+            dormer_glass = floor_lights[-1] or MAT["glass"]
+            mb.box((x_front + front_sign * 0.13, dy, base_z + 0.62),
+                   (0.06, 0.62, 0.68), dormer_glass)
             mb.box((x_front + front_sign * 0.16, dy, base_z + 0.62), (0.05, 0.08, 0.68), MAT["timber"])
             # Tiny ridge-forward roof: two slopes + front gable triangle.
             rw, rh = 0.85, 0.62
@@ -521,7 +582,10 @@ def make_house(name, cx, cy, width, depth, front_sign, style_seed, stone=False, 
             y = cy - width / 2 + width * (bay + 0.5) / bays
             ww = min(1.15, width / bays * 0.53)
             wh = 1.28
-            mb.box((glass_x, y, z), (0.10, ww, wh), MAT["glass"])
+            window_mat = floor_lights[fl]
+            if window_mat is None or light_r.random() > 0.82:
+                window_mat = MAT["glass"]
+            mb.box((glass_x, y, z), (0.10, ww, wh), window_mat)
             for oy in (-ww / 2 - 0.06, ww / 2 + 0.06):
                 mb.box((frame_x, y + oy, z), (0.14, 0.12, wh + 0.24), MAT["timber"])
             mb.box((frame_x, y, z + wh / 2 + 0.06), (0.14, ww + 0.28, 0.12), MAT["timber"])
@@ -657,39 +721,98 @@ def add_cobbles():
 
 def make_castle():
     mb = MeshBuilder()
-    # Layered court, curtain wall, keep and roofed gatehouse.
-    mb.box((0, 104, 2.2), (64, 22, 4.4), MAT["stone"])
-    mb.box((0, 101, 23), (27, 21, 42), MAT["stone2"])
+    # Layered court, curtain wall, keep and roofed gatehouse. The central
+    # volumes are deliberately split around a 8.4m corridor: the approach is
+    # a real passage through the gatehouse and keep, not a dark panel pasted
+    # onto a solid wall.
+    gate_half = 4.2
+    for side in (-1, 1):
+        mb.box((side * 18.1, 104, 2.2), (27.8, 22, 4.4), MAT["stone"])
+        mb.box((side * 8.85, 101, 6.7), (9.3, 21, 9.4), MAT["stone2"])
+    mb.box((0, 101, 27.7), (27, 21, 32.6), MAT["stone2"])
     mb.hip_roof(0, 101, 44, 29.5, 23.5, 8.0, MAT["slate"])
-    mb.box((0, 92, 11), (58, 4.2, 18), MAT["stone"])
+    for side in (-1, 1):
+        mb.box((side * 16.6, 92, 11), (24.8, 4.2, 18), MAT["stone"])
+    mb.box((0, 92, 15.7), (8.4, 4.2, 8.6), MAT["stone"])
     mb.box((-28, 103, 13), (4.2, 25, 22), MAT["stone"])
     mb.box((28, 103, 13), (4.2, 25, 22), MAT["stone"])
-    mb.box((0, 88.5, 12), (18.5, 9.5, 22), MAT["stone2"])
+    for side in (-1, 1):
+        mb.box((side * 6.725, 88.5, 12), (5.05, 9.5, 22), MAT["stone2"])
+    mb.box((0, 88.5, 17.2), (8.4, 9.5, 11.6), MAT["stone2"])
     mb.hip_roof(0, 88.5, 23, 11.2, 21.0, 5.4, MAT["green"])
 
-    # True arched silhouette panel and block voussoirs at the castle approach.
-    arch_y = 83.68
-    arch = [(-3.7, arch_y, 0.05), (3.7, arch_y, 0.05), (3.7, arch_y, 7.5)]
-    for j in range(7):
-        a = j * math.pi / 6
-        arch.append((3.7 * math.cos(a), arch_y, 7.5 + 3.7 * math.sin(a)))
-    arch.append((-3.7, arch_y, 0.05))
-    mb.face(arch, MAT["iron"])
-    for x in (-4.3, 4.3):
-        for z in (2.0, 4.2, 6.4):
-            mb.box((x, arch_y - 0.12, z), (0.95, 0.45, 1.65), MAT["stone2"])
-    for j in range(7):
-        a = j * math.pi / 6
-        mb.box((4.25 * math.cos(a), arch_y - 0.12, 7.5 + 4.25 * math.sin(a)),
-               (0.95, 0.45, 1.05), MAT["stone2"])
-    for x in (-2.55, -1.28, 0, 1.28, 2.55):
-        mb.box((x, arch_y - 0.28, 6.0), (0.13, 0.12, 9.0), MAT["gold"])
-    mb.box((0, arch_y - 0.28, 7.3), (6.3, 0.12, 0.16), MAT["gold"])
+    # Continuous tunnel shell and a slightly raised floor lead the eye through
+    # the gate into the rear court.
+    tunnel_mid_y = 97.6
+    tunnel_depth = 27.6
+    mb.box((0, tunnel_mid_y, 0.12), (7.8, tunnel_depth, 0.20), MAT["stone2"])
+    for side in (-1, 1):
+        mb.box((side * 4.05, tunnel_mid_y, 5.65),
+               (0.30, tunnel_depth, 10.9), MAT["stone"])
+    mb.box((0, tunnel_mid_y, 11.18), (8.1, tunnel_depth, 0.34), MAT["tunnel"])
+
+    # Stepped stone spandrels turn the rectangular structural opening into a
+    # readable arch; a proper extruded voussoir ring hides the small steps.
+    arch_y_front, arch_y_back = 83.42, 83.92
+    spring_z, inner_r, outer_r = 7.25, 3.55, 4.32
+    strips = 14
+    strip_w = inner_r * 2 / strips
+    for j in range(strips):
+        x = -inner_r + (j + 0.5) * strip_w
+        arch_z = spring_z + math.sqrt(max(0.0, inner_r * inner_r - x * x))
+        h = 11.42 - arch_z
+        if h > 0.02:
+            mb.box((x, 83.66, arch_z + h / 2), (strip_w + 0.03, 0.50, h), MAT["stone2"])
+
+    for side in (-1, 1):
+        for z in (1.25, 3.35, 5.45):
+            mb.box((side * 3.88, 83.62, z), (0.72, 0.62, 1.72), MAT["stone2"])
+
+    for j in range(12):
+        a0, a1 = j * math.pi / 12, (j + 1) * math.pi / 12
+        verts = []
+        for y in (arch_y_front, arch_y_back):
+            verts.extend([
+                (inner_r * math.cos(a0), y, spring_z + inner_r * math.sin(a0)),
+                (outer_r * math.cos(a0), y, spring_z + outer_r * math.sin(a0)),
+                (outer_r * math.cos(a1), y, spring_z + outer_r * math.sin(a1)),
+                (inner_r * math.cos(a1), y, spring_z + inner_r * math.sin(a1)),
+            ])
+        start = len(mb.vertices)
+        mb.vertices.extend(verts)
+        for q in ((0, 1, 2, 3), (4, 7, 6, 5), (0, 4, 5, 1),
+                  (1, 5, 6, 2), (2, 6, 7, 3), (3, 7, 4, 0)):
+            mb.faces.append(tuple(start + i for i in q))
+            mb.mat_ids.append(MAT_INDEX[MAT["stone2"].name])
+
+    # A raised portcullis is visible deep inside while leaving a human-scale
+    # clear passage beneath it.
+    port_y = 105.2
+    for x in (-3.0, -2.0, -1.0, 0, 1.0, 2.0, 3.0):
+        mb.box((x, port_y, 7.3), (0.13, 0.16, 7.2), MAT["gate_iron"])
+    for z in (4.2, 6.8, 9.4, 10.75):
+        mb.box((0, port_y, z), (6.6, 0.18, 0.15), MAT["gate_iron"])
+
+    # Projecting gallery/corbels and compact guard rooms add a defensive,
+    # occupied silhouette without competing with the main towers.
+    mb.box((0, 83.25, 18.4), (18.8, 1.25, 0.72), MAT["stone"])
+    for x in (-7.4, -3.7, 0, 3.7, 7.4):
+        mb.box((x, 83.45, 17.25), (0.72, 1.35, 1.7), MAT["stone2"])
+    for side in (-1, 1):
+        gx = side * 12.0
+        mb.box((gx, 86.9, 3.25), (4.5, 6.0, 6.5), MAT["stone"])
+        mb.hip_roof(gx, 86.9, 6.5, 5.0, 6.5, 2.0, MAT["slate"])
+        mb.box((gx, 83.84, 1.3), (1.25, 0.16, 2.4), MAT["wood"])
+        mb.box((gx, 83.72, 4.35), (0.62, 0.14, 1.25), MAT["glass"])
+        if DUSK_MODE:
+            mb.box((side * 3.45, 83.26, 4.45), (0.24, 0.18, 0.42), MAT["light"])
 
     # Towers now use wall-top coordinates; roof eaves sit directly on the drums.
     towers = [(-23, 92, 6.4, 35), (23, 92, 6.4, 35),
               (-20, 108, 7.0, 43), (20, 108, 7.0, 43),
-              (0, 106, 7.8, 61)]
+              # Rear-set central tower preserves the landmark silhouette
+              # without plugging the newly open gate tunnel.
+              (0, 119, 7.8, 61)]
     for i, (x, y, radius, height) in enumerate(towers):
         mb.cylinder((x, y, height / 2), radius, height, MAT["stone2"], 14)
         mb.cylinder((x, y, height + 0.2), radius + 1.15, 0.8, MAT["stone"], 14)
@@ -712,6 +835,12 @@ def make_castle():
         mb.box((x, 90.04, 28), (2.4, 0.12, 7.5), MAT["rose"])
         mb.box((x, 89.94, 30.5), (0.3, 0.12, 2.0), MAT["gold"])
     mb.object("Castle_MainComplex", COLLECTIONS["Castle"])
+    if DUSK_MODE:
+        for side in (-1, 1):
+            add_point_light(
+                f"Prop_CastleGateTorch_{'E' if side > 0 else 'W'}",
+                (side * 3.45, 82.85, 4.45), energy=480.0, radius=0.75,
+            )
 
 
 def make_walls():
@@ -719,12 +848,16 @@ def make_walls():
     # A tighter ring keeps the interior urban rather than park-like.
     mb.box((-78, 3, 5.5), (4, 190, 11), MAT["stone"])
     mb.box((78, 3, 5.5), (4, 190, 11), MAT["stone"])
-    mb.box((0, 98, 5.5), (156, 4, 11), MAT["stone"])
+    # The castle replaces the central north-wall span. Leaving a wall slab
+    # behind it would silently plug the otherwise open gate tunnel.
+    for side in (-1, 1):
+        mb.box((side * 55, 98, 5.5), (46, 4, 11), MAT["stone"])
     mb.box((-45, -92, 5.5), (66, 4, 11), MAT["stone"])
     mb.box((45, -92, 5.5), (66, 4, 11), MAT["stone"])
     # Crenellations.
     for x in range(-75, 76, 5):
-        mb.box((x, 98, 11.9), (2.7, 4.5, 2.0), MAT["stone2"])
+        if abs(x) >= 33:
+            mb.box((x, 98, 11.9), (2.7, 4.5, 2.0), MAT["stone2"])
         if abs(x) > 13:
             mb.box((x, -92, 11.9), (2.7, 4.5, 2.0), MAT["stone2"])
     for y in range(-89, 96, 5):
@@ -766,6 +899,8 @@ def make_market_and_props():
         for j in range(4):
             mb.box((x - 1.8 + j * 1.2, y, 1.48), (0.65, 0.7, 0.35),
                    MAT["ochre"] if j % 2 else MAT["green"])
+        if DUSK_MODE:
+            mb.box((x, y, 2.72), (0.30, 0.30, 0.42), MAT["light"])
     # Crates, barrels and carts.
     for i in range(20 if not TEST_MODE else 7):
         x = RNG.choice((-1, 1)) * RNG.uniform(8, 28)
@@ -776,8 +911,9 @@ def make_market_and_props():
             mb.cylinder((x, y, 0.58), 0.46, 1.12, MAT["wood"], 10)
             mb.cylinder((x, y, 0.58), 0.48, 0.10, MAT["iron"], 10)
     # Lanterns along the street.
-    for y in range(-72, 73, 12):
-        for x in (-7.0, 7.0):
+    street_lamp_x = 5.65
+    for y in range(-60, 73, 12):
+        for x in (-street_lamp_x, street_lamp_x):
             mb.cylinder((x, y, 2.1), 0.09, 4.2, MAT["iron"], 8)
             mb.box((x, y, 4.35), (0.48, 0.48, 0.68), MAT["light"])
             mb.box((x, y, 4.73), (0.68, 0.68, 0.10), MAT["iron"])
@@ -822,6 +958,18 @@ def make_market_and_props():
     for hx in (-0.45, 0.45):
         mb.box((cart_x + hx, cart_y - 1.85, 0.72), (0.08, 1.2, 0.08), MAT["timber"])
     mb.object("Prop_MarketFountainStallsStreetFurniture", COLLECTIONS["Props"])
+    if DUSK_MODE:
+        for y in range(-60, 73, 12):
+            for x in (-street_lamp_x, street_lamp_x):
+                add_point_light(
+                    f"Prop_StreetLantern_{'E' if x > 0 else 'W'}_{y:+04d}",
+                    (x, y, 3.88), energy=430.0, radius=1.15,
+                )
+        for i, (x, y, _rot) in enumerate(stall_positions):
+            add_point_light(
+                f"Prop_MarketLamp_{i:02d}", (x, y, 2.34),
+                energy=280.0, radius=0.85,
+            )
 
 
 def make_trees_and_mountains():
@@ -920,6 +1068,7 @@ def setup_scene():
     scene.render.image_settings.color_mode = "RGBA"
     scene.render.image_settings.color_depth = "8"
     scene.view_settings.look = "AgX - Medium High Contrast"
+    scene.view_settings.exposure = 1.15 if DUSK_MODE else 0.0
     world = scene.world
     world.use_nodes = True
     nodes = world.node_tree.nodes
@@ -928,22 +1077,23 @@ def setup_scene():
     sky = nodes.new("ShaderNodeTexSky")
     sky_items = sky.bl_rna.properties["sky_type"].enum_items.keys()
     sky.sky_type = "NISHITA" if "NISHITA" in sky_items else "SINGLE_SCATTERING"
-    sky.sun_elevation = math.radians(18)
-    sky.sun_rotation = math.radians(215)
-    sky.altitude = 0.18
-    sky.air_density = 1.25
+    sky.sun_elevation = math.radians(-2.0 if DUSK_MODE else 18)
+    sky.sun_rotation = math.radians(248 if DUSK_MODE else 215)
+    sky.altitude = 0.12 if DUSK_MODE else 0.18
+    sky.air_density = 1.45 if DUSK_MODE else 1.25
     if hasattr(sky, "dust_density"):
-        sky.dust_density = 2.2
+        sky.dust_density = 3.8 if DUSK_MODE else 2.2
     if hasattr(sky, "ground_albedo"):
-        sky.ground_albedo = 0.45
-    bg.inputs["Strength"].default_value = 0.38
+        sky.ground_albedo = 0.18 if DUSK_MODE else 0.45
+    bg.inputs["Strength"].default_value = 0.26 if DUSK_MODE else 0.38
     links.new(sky.outputs["Color"], bg.inputs["Color"])
 
-    sun_data = bpy.data.lights.new("Environment_Sun", "SUN")
-    sun_data.energy = 3.0
-    sun_data.color = (1.0, 0.70, 0.45)
-    sun_data.angle = math.radians(7)
-    sun = bpy.data.objects.new("Environment_Sun", sun_data)
+    sun_name = "Environment_Moonlight" if DUSK_MODE else "Environment_Sun"
+    sun_data = bpy.data.lights.new(sun_name, "SUN")
+    sun_data.energy = 1.30 if DUSK_MODE else 3.0
+    sun_data.color = (0.28, 0.42, 1.0) if DUSK_MODE else (1.0, 0.70, 0.45)
+    sun_data.angle = math.radians(11 if DUSK_MODE else 7)
+    sun = bpy.data.objects.new(sun_name, sun_data)
     COLLECTIONS["Environment"].objects.link(sun)
     sun.rotation_euler = (math.radians(43), math.radians(-22), math.radians(-32))
 
@@ -964,16 +1114,33 @@ def point_camera(cam, location, target, lens):
 
 
 def render_views(cam):
-    views = {
-        "overview": ((122, -140, 112), (0, 18, 13), 47),
-        "overview_quarter": ((94, -104, 62), (0, 15, 10), 52),
-        "main_street_fp": ((0, -72, 1.6), (0, 65, 15), 32),
-        "plaza_fp": ((-14, 12, 1.6), (3, 27, 2.6), 34),
-        "castle_gate_fp": ((-2.5, 34, 1.6), (0.5, 89, 14), 30),
-        "alley_fp": ((26.75, -42, 1.6), (26.75, -2, 4.2), 35),
-    }
+    if DUSK_MODE:
+        views = {
+            "dusk_main_street": ((0, -72, 1.6), (0, 65, 12), 32),
+            "dusk_plaza": ((-14, 12, 1.6), (3, 27, 2.6), 34),
+            "dusk_overview_quarter": ((94, -104, 62), (0, 15, 10), 52),
+        }
+    else:
+        views = {
+            "overview": ((122, -140, 112), (0, 18, 13), 47),
+            "overview_quarter": ((94, -104, 62), (0, 15, 10), 52),
+            "main_street_fp": ((0, -72, 1.6), (0, 65, 15), 32),
+            "plaza_fp": ((-14, 12, 1.6), (3, 27, 2.6), 34),
+            "castle_gate_fp": ((-2.5, 34, 1.6), (0.5, 89, 9.5), 32),
+            "alley_fp": ((26.75, -42, 1.6), (26.75, -2, 4.2), 35),
+        }
     if TEST_MODE:
-        views = {"main_street_fp": views["main_street_fp"], "overview": views["overview"]}
+        if DUSK_MODE:
+            views = {
+                "dusk_main_street": views["dusk_main_street"],
+                "dusk_plaza": views["dusk_plaza"],
+            }
+        else:
+            views = {
+                "main_street_fp": views["main_street_fp"],
+                "castle_gate_fp": views["castle_gate_fp"],
+                "overview": views["overview"],
+            }
     for name, (loc, target, lens) in views.items():
         log(f"Rendering {name}")
         point_camera(cam, loc, target, lens)
@@ -1023,7 +1190,10 @@ def validate_and_report():
 
 
 def main():
-    log(f"Starting seed={SEED}, test_mode={TEST_MODE}, Blender={bpy.app.version_string}")
+    log(
+        f"Starting seed={SEED}, test_mode={TEST_MODE}, dusk_mode={DUSK_MODE}, "
+        f"Blender={bpy.app.version_string}"
+    )
     build_streets_and_houses()
     add_cobbles()
     make_castle()
@@ -1033,9 +1203,13 @@ def main():
     cam = setup_scene()
     validate_and_report()
     render_views(cam)
-    if not TEST_MODE or os.environ.get("TOWN_TEST_EXPORT", "0") == "1":
+    if not DUSK_MODE and (not TEST_MODE or os.environ.get("TOWN_TEST_EXPORT", "0") == "1"):
         export_scene()
-    bpy.ops.wm.save_as_mainfile(filepath=str(EXPORT_DIR / ("town_test.blend" if TEST_MODE else "town.blend")))
+    if DUSK_MODE:
+        blend_name = "town_dusk_test.blend" if TEST_MODE else "town_dusk.blend"
+    else:
+        blend_name = "town_test.blend" if TEST_MODE else "town.blend"
+    bpy.ops.wm.save_as_mainfile(filepath=str(EXPORT_DIR / blend_name))
     validate_and_report()
     log("SUCCESS")
 

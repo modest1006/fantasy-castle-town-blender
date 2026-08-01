@@ -51,7 +51,17 @@
   <figure><img src="../renders/overview.png" alt="俯瞰">
     <figcaption><b>俯瞰</b> — 城・城下町・市場広場・外周城壁。建物は隣接配置で市街の密度を確保</figcaption></figure>
   <figure><img src="../renders/overview_quarter.png" alt="クォータービュー">
-    <figcaption><b>クォータービュー</b> — 屋根瓦3色 (テラコッタ/スレート/緑) と壁色のバリエーション</figcaption></figure>
+    <figcaption><b>クォータービュー</b> — 屋根瓦3色 (テラコッタ/スレート/緑) と壁色のバリエーション、ドーマー窓</figcaption></figure>
+</div>
+
+<h2>夕暮れバリエーション (TOWN_DUSK)</h2>
+<div class="grid">
+  <figure><img src="../renders/dusk_main_street.png" alt="夕暮れの大通り">
+    <figcaption><b>夕暮れの大通り</b> — 街灯と確率点灯の窓明かりが主光源。城は暗いシルエットに</figcaption></figure>
+  <figure><img src="../renders/dusk_plaza.png" alt="夕暮れの広場">
+    <figcaption><b>夕暮れの広場</b> — 弱い寒色の月光＋暖色の窓・街灯のコントラスト</figcaption></figure>
+  <figure><img src="../renders/dusk_overview_quarter.png" alt="夕暮れ俯瞰">
+    <figcaption><b>夕暮れ俯瞰</b> — 建物・階ごとに点灯率を変えた窓が街の生活感を作る</figcaption></figure>
 </div>
 
 <h2>制作体制 — Claude と Codex の役割交代</h2>
@@ -65,6 +75,10 @@
       <td>瓦の市松模様化を修正、木目のマーブル化を修正、山をコーン群→連続稜線リングに、路地の装飾過多を整理、樹冠を球体化、草地テクスチャ追加</td></tr>
   <tr><td>v4-v5</td><td>Claude</td><td>Codex指摘反映</td>
       <td>石畳ジオメトリ削減 (全体trisの78%→散布方式)、テクスチャの完全タイリング保証 (整数波数ベクトル)、FBXをメッシュのみに、マテリアルスロット絞り込み、雪頂、地平の黒帯修正、カメラ調整</td></tr>
+  <tr><td>第1バッチ</td><td>Claude</td><td>Codex</td>
+      <td>窓の深度レイヤ化 (奥まったガラス・枠・窓台)、開いた鎧戸、ドーマー窓、煙突変化、壁際の生活小物 (樽/木箱/ベンチ/植木/手押し車)、石畳の補修パッチ化。Codexレビューでドーマー埋没等4点を指摘→修正</td></tr>
+  <tr><td>第2バッチ</td><td>Codex</td><td>Claude</td>
+      <td>城門を本物の門洞に再構築 (アーチ・奥にセットバックした格子・門洞内部)、夕暮れモード (TOWN_DUSK=1、窓の確率点灯・街灯主光源・月光)</td></tr>
 </table>
 
 <h2>自前生成テクスチャ (ダウンロード素材なし)</h2>
