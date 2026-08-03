@@ -53,6 +53,8 @@ Unity 等のゲームエンジンで「歩ける街」として使うことを�
 
 ## Unity 取り込みメモ
 
+✅ **Unity 6 (Built-in RP) で取り込み検証済み** — `town.fbx`＋隣接PNGを `Assets/` にコピーするだけでマテリアル・テクスチャ・スケールが再現されます ([スクリーンショット](renders/unity/unity_overview.png))。
+
 - 1 unit = 1m、メッシュのみの FBX (カメラ・ライト除外済み)
 - 各メッシュは使用マテリアルのみ登録 (サブメッシュ削減済み)
 - `Ground_Cobblestones` (散布した浮き石) は Collider 対象外推奨。歩行判定は平らな路面へ
