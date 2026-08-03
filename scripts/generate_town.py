@@ -25,6 +25,7 @@ DUSK_MODE = os.environ.get("TOWN_DUSK", "0") == "1"
 TURNTABLE_MODE = os.environ.get("TOWN_TURNTABLE", "0") == "1"
 WALKTHROUGH_MODE = os.environ.get("TOWN_WALKTHROUGH", "0") == "1"
 SNOW_MODE = os.environ.get("TOWN_SNOW", "0") == "1"
+INTERIOR_MODE = os.environ.get("TOWN_INTERIOR", "0") == "1"
 ROOT = Path(__file__).resolve().parent.parent
 RENDER_DIR = ROOT / "renders"
 EXPORT_DIR = ROOT / "export"
@@ -61,7 +62,10 @@ def clean_scene():
 clean_scene()
 
 COLLECTIONS = {}
-for name in ("Castle", "Town", "Walls", "Props", "Ground", "Environment"):
+collection_names = ("Castle", "Town", "Walls", "Props", "Ground", "Environment")
+if INTERIOR_MODE:
+    collection_names += ("Interior",)
+for name in collection_names:
     coll = bpy.data.collections.new(name)
     bpy.context.scene.collection.children.link(coll)
     COLLECTIONS[name] = coll
@@ -324,6 +328,25 @@ if SNOW_MODE:
         "MAT_PackedSnow", (0.64, 0.70, 0.74), 0.96,
         texture="snow_path",
     )
+if INTERIOR_MODE:
+    MAT["interior_fire"] = material(
+        "MAT_InteriorFire", (1.0, 0.18, 0.015), 0.28,
+        emission=(1.0, 0.045, 0.003), emission_strength=6.0,
+    )
+    MAT["interior_lantern"] = material(
+        "MAT_InteriorLantern", (1.0, 0.48, 0.08), 0.32,
+        emission=(1.0, 0.20, 0.025), emission_strength=10.0,
+    )
+    MAT["interior_window"] = material(
+        "MAT_InteriorWindow", (0.12, 0.20, 0.28), 0.38,
+        emission=(0.10, 0.20, 0.34), emission_strength=0.7,
+    )
+    MAT["interior_green_glass"] = material(
+        "MAT_InteriorGreenGlass", (0.035, 0.20, 0.09), 0.24, metallic=0.08,
+    )
+    MAT["interior_amber_glass"] = material(
+        "MAT_InteriorAmberGlass", (0.34, 0.105, 0.025), 0.22, metallic=0.08,
+    )
 ALL_MATERIALS = list(MAT.values())
 MAT_INDEX = {m.name: i for i, m in enumerate(ALL_MATERIALS)}
 
@@ -560,6 +583,266 @@ class MeshBuilder:
         obj = bpy.data.objects.new(name, mesh)
         collection.objects.link(obj)
         return obj
+
+
+def add_interior_light(name, light_type, location, energy, color, radius=0.5):
+    data = bpy.data.lights.new(name + "_Data", light_type)
+    data.energy = energy
+    data.color = color
+    if light_type == "POINT":
+        data.shadow_soft_size = radius
+    elif light_type == "AREA":
+        data.shape = "RECTANGLE"
+        data.size = radius
+        data.size_y = radius
+    obj = bpy.data.objects.new(name, data)
+    obj.location = location
+    COLLECTIONS["Interior"].objects.link(obj)
+    return obj
+
+
+def make_tavern_interior():
+    """Build only the Landmark_Tavern ground-floor taproom.
+
+    Unity placement convention: the entrance threshold is world origin, the
+    door opens toward -Y, and the 12 x 9 metre room extends into +Y.
+    """
+    coll = COLLECTIONS["Interior"]
+
+    # Shell: warm inward-facing plaster, a real open doorway, plank floor, and
+    # a shallow ceiling whose dark joists remain visible from eye height.
+    shell = MeshBuilder()
+    shell.box((0.0, 4.5, -0.09), (12.0, 9.0, 0.18), MAT["wood"])
+    shell.box((0.0, 4.5, 3.28), (12.0, 9.0, 0.16), MAT["cream"])
+    shell.box((-3.55, 0.0, 1.6), (4.9, 0.20, 3.2), MAT["cream2"])
+    shell.box((3.55, 0.0, 1.6), (4.9, 0.20, 3.2), MAT["cream2"])
+    shell.box((0.0, 0.0, 2.82), (2.2, 0.20, 0.76), MAT["cream2"])
+    shell.box((0.0, 9.0, 1.6), (12.0, 0.20, 3.2), MAT["cream2"])
+    shell.box((-6.0, 4.5, 1.6), (0.20, 9.0, 3.2), MAT["cream2"])
+    shell.box((6.0, 4.5, 1.6), (0.20, 9.0, 3.2), MAT["cream2"])
+    # Threshold and heavy door frame make the export origin unmistakable.
+    shell.box((0.0, 0.04, 0.06), (2.25, 0.34, 0.12), MAT["stone2"])
+    for x in (-1.15, 1.15):
+        shell.box((x, 0.08, 1.35), (0.22, 0.28, 2.7), MAT["timber"])
+    shell.box((0.0, 0.08, 2.66), (2.5, 0.28, 0.24), MAT["timber"])
+    for y in (0.65, 2.25, 3.85, 5.45, 7.05, 8.55):
+        shell.box((0.0, y, 3.03), (12.0, 0.20, 0.22), MAT["timber"])
+    shell.object("Interior_Architecture", coll)
+
+    # Slightly raised individual floorboards add readable grain and seams
+    # while keeping the geometry inexpensive.
+    floor = MeshBuilder()
+    for i in range(20):
+        x = -5.7 + i * 0.60
+        floor.box((x, 4.5, 0.015), (0.565, 8.8, 0.03), MAT["wood"])
+    floor.object("Interior_Floorboards", coll)
+
+    # Side windows: weak cool panes contrasted against timber frames.
+    windows = MeshBuilder()
+    for x in (-5.89, 5.89):
+        for y in (2.25, 6.65):
+            windows.box((x, y, 1.72), (0.035, 1.25, 1.22), MAT["interior_window"])
+            for dy in (-0.69, 0.69):
+                windows.box((x * 0.998, y + dy, 1.72), (0.12, 0.10, 1.48), MAT["timber"])
+            for z in (1.02, 2.42):
+                windows.box((x * 0.998, y, z), (0.12, 1.48, 0.10), MAT["timber"])
+            windows.box((x * 0.997, y, 1.72), (0.13, 0.08, 1.28), MAT["timber"])
+    windows.object("Interior_Windows", coll)
+
+    # Bar along the left wall, with shelves, mugs and a deterministic set of
+    # low-poly bottles.
+    bar = MeshBuilder()
+    bar.box((-3.72, 5.62, 0.62), (1.05, 5.05, 1.18), MAT["timber"])
+    bar.box((-3.50, 5.62, 1.27), (1.50, 5.35, 0.18), MAT["wood"])
+    bar.box((-5.65, 5.78, 1.44), (0.30, 5.15, 0.18), MAT["wood"])
+    bar.box((-5.65, 5.78, 2.35), (0.30, 5.15, 0.18), MAT["wood"])
+    for y in (3.25, 5.80, 8.30):
+        bar.box((-5.67, y, 1.82), (0.26, 0.16, 1.55), MAT["timber"])
+    bottle_mats = (MAT["interior_green_glass"], MAT["interior_amber_glass"], MAT["glass"])
+    bottle_y = (3.62, 4.05, 4.62, 5.10, 5.72, 6.15, 6.82, 7.35, 7.88)
+    for i, y in enumerate(bottle_y):
+        z = 1.67 if i % 2 == 0 else 2.58
+        mat = bottle_mats[i % len(bottle_mats)]
+        bar.cylinder((-5.45, y, z), 0.105, 0.37, mat, segments=8)
+        bar.cylinder((-5.45, y, z + 0.245), 0.045, 0.16, mat, segments=8)
+    for y in (3.45, 4.10, 7.25):
+        bar.cylinder((-3.17, y, 1.45), 0.12, 0.22, MAT["stone2"], segments=8)
+    bar.object("Interior_BarAndShelves", coll)
+
+    furniture = MeshBuilder()
+
+    def add_chair(x, y, rot=0.0, stool=False):
+        seat_h = 0.70 if stool else 0.48
+        c, s = math.cos(rot), math.sin(rot)
+        furniture.box((x, y, seat_h), (0.48, 0.48, 0.12), MAT["wood"], rot)
+        for lx in (-0.18, 0.18):
+            for ly in (-0.18, 0.18):
+                px, py = x + lx * c - ly * s, y + lx * s + ly * c
+                furniture.box((px, py, seat_h * 0.5), (0.09, 0.09, seat_h), MAT["timber"])
+        if not stool:
+            back_y = 0.22
+            px, py = x - back_y * s, y + back_y * c
+            furniture.box((px, py, 0.92), (0.48, 0.10, 0.78), MAT["wood"], rot)
+
+    # Three communal tables plus a small fireside table.
+    table_specs = ((1.15, 2.15, 0.0), (3.45, 4.20, 0.08), (1.45, 6.55, -0.08))
+    for tx, ty, rot in table_specs:
+        furniture.box((tx, ty, 0.78), (2.05, 1.18, 0.14), MAT["wood"], rot)
+        for dx in (-0.78, 0.78):
+            for dy in (-0.40, 0.40):
+                furniture.box((tx + dx, ty + dy, 0.39), (0.13, 0.13, 0.78), MAT["timber"])
+        add_chair(tx - 1.35, ty, math.pi / 2)
+        add_chair(tx + 1.35, ty, -math.pi / 2)
+        add_chair(tx, ty - 0.92, 0.0)
+        add_chair(tx, ty + 0.92, math.pi)
+    furniture.box((3.62, 7.25, 0.73), (1.25, 0.82, 0.12), MAT["wood"])
+    add_chair(2.75, 7.25, math.pi / 2)
+    for y in (3.55, 4.75, 5.95, 7.15):
+        add_chair(-2.78, y, -math.pi / 2, stool=True)
+    furniture.object("Interior_TablesChairsStools", coll)
+
+    # Back-wall masonry fireplace, with glowing logs and flames backed by a
+    # dark opening. A local point light supplies the physically useful warmth.
+    hearth = MeshBuilder()
+    hearth.box((3.95, 8.66, 1.25), (3.0, 0.68, 2.5), MAT["stone"])
+    hearth.box((3.95, 8.28, 0.15), (3.45, 1.12, 0.30), MAT["stone2"])
+    hearth.box((3.95, 8.29, 0.94), (1.72, 0.06, 1.42), MAT["tunnel"])
+    hearth.box((3.95, 8.23, 1.72), (2.25, 0.38, 0.30), MAT["stone2"])
+    for x in (3.48, 3.95, 4.42):
+        hearth.cylinder((x, 8.05, 0.43), 0.13, 0.82, MAT["timber"], segments=8, axis="X")
+    for x, z, radius, height in ((3.62, 0.48, 0.25, 0.92),
+                                  (3.98, 0.45, 0.30, 1.15),
+                                  (4.30, 0.48, 0.22, 0.82)):
+        hearth.cone((x, 8.00), z, radius, height, MAT["interior_fire"], segments=10)
+    hearth.object("Interior_Fireplace", coll)
+    add_interior_light(
+        "Interior_FireLight", "POINT", (3.95, 7.72, 0.82),
+        520.0 if TEST_MODE else 700.0, (1.0, 0.16, 0.025), 1.1,
+    )
+
+    # Crates and iron-hooped barrels fill the service corners.
+    storage = MeshBuilder()
+    for x, y, z, sx, sy, sz in (
+        (-4.95, 1.00, 0.36, 0.78, 0.72, 0.72),
+        (-4.55, 1.38, 1.02, 0.70, 0.65, 0.62),
+        (5.08, 1.15, 0.34, 0.75, 0.72, 0.68),
+    ):
+        storage.box((x, y, z), (sx, sy, sz), MAT["wood"])
+        storage.box((x, y - sy * 0.51, z), (sx * 0.85, 0.05, 0.08), MAT["timber"])
+        storage.box((x, y + sy * 0.51, z), (sx * 0.85, 0.05, 0.08), MAT["timber"])
+    for x, y in ((-5.05, 8.10), (5.18, 2.35), (5.18, 3.25)):
+        storage.cylinder((x, y, 0.50), 0.43, 1.0, MAT["wood"], segments=12)
+        for z in (0.15, 0.50, 0.85):
+            storage.cylinder((x, y, z), 0.445, 0.055, MAT["iron"], segments=12)
+    storage.object("Interior_BarrelsCrates", coll)
+
+    # Compact staircase to a blocked upper landing.
+    stairs = MeshBuilder()
+    for i in range(11):
+        y = 5.20 + i * 0.30
+        z = 0.14 + i * 0.25
+        stairs.box((5.12, y, z * 0.5), (1.35, 0.34, z), MAT["wood"])
+    stairs.box((5.12, 8.48, 2.82), (1.55, 0.65, 0.18), MAT["wood"])
+    stairs.box((5.12, 8.86, 2.68), (1.72, 0.18, 0.95), MAT["timber"])
+    stairs.beam((4.34, 5.08, 0.72), (4.34, 8.50, 3.08), 0.10, 0.12, MAT["timber"])
+    for i in range(6):
+        y = 5.20 + i * 0.64
+        z = 0.72 + i * 0.44
+        stairs.box((4.34, y, z), (0.12, 0.12, 0.80), MAT["timber"])
+    stairs.object("Interior_Staircase", coll)
+
+    lanterns = MeshBuilder()
+    for x, y, z in ((-5.72, 1.55, 2.35), (5.72, 4.95, 2.38),
+                    (-5.72, 7.85, 2.35), (0.0, 8.75, 2.42)):
+        lanterns.box((x, y, z), (0.24, 0.24, 0.46), MAT["iron"])
+        lanterns.box((x, y, z), (0.18, 0.18, 0.30), MAT["interior_lantern"])
+        lanterns.box((x, y, z + 0.32), (0.08, 0.08, 0.22), MAT["iron"])
+        add_interior_light(
+            f"Interior_LanternLight_{len([o for o in coll.objects if o.type == 'LIGHT']):02d}",
+            "POINT", (x, y, z), 150.0 if TEST_MODE else 210.0,
+            (1.0, 0.30, 0.055), 0.55,
+        )
+    lanterns.object("Interior_WallLanterns", coll)
+
+
+def setup_interior_scene():
+    scene = bpy.context.scene
+    engine_items = scene.render.bl_rna.properties["engine"].enum_items.keys()
+    scene.render.engine = (
+        "BLENDER_EEVEE_NEXT" if "BLENDER_EEVEE_NEXT" in engine_items else "BLENDER_EEVEE"
+    )
+    scene.render.resolution_x = 640 if TEST_MODE else 1920
+    scene.render.resolution_y = 360 if TEST_MODE else 1080
+    scene.render.resolution_percentage = 100
+    scene.render.image_settings.file_format = "PNG"
+    scene.render.image_settings.color_mode = "RGBA"
+    scene.render.image_settings.color_depth = "8"
+    scene.render.film_transparent = False
+    scene.view_settings.look = "AgX - Medium High Contrast"
+    scene.view_settings.exposure = 0.40
+    scene.world.use_nodes = True
+    background = scene.world.node_tree.nodes.get("Background")
+    background.inputs["Color"].default_value = (0.012, 0.020, 0.035, 1.0)
+    background.inputs["Strength"].default_value = 0.12
+
+    fill = add_interior_light(
+        "Interior_WindowFill", "AREA", (0.0, 1.0, 2.65),
+        260.0 if TEST_MODE else 340.0, (0.36, 0.52, 0.78), 5.0,
+    )
+    fill.rotation_euler = (0.0, 0.0, 0.0)
+    key = add_interior_light(
+        "Interior_WarmCeilingFill", "AREA", (0.0, 5.0, 2.82),
+        340.0 if TEST_MODE else 470.0, (1.0, 0.58, 0.25), 5.0,
+    )
+    key.rotation_euler = (0.0, 0.0, 0.0)
+
+    cam_data = bpy.data.cameras.new("Interior_RenderCamera_Data")
+    cam = bpy.data.objects.new("Interior_RenderCamera", cam_data)
+    COLLECTIONS["Interior"].objects.link(cam)
+    scene.camera = cam
+    cam_data.sensor_width = 36
+    cam_data.lens = 30
+    return cam
+
+
+def render_interior_views(cam):
+    views = {
+        "interior_taproom": ((-1.10, 0.38, 1.68), (0.80, 6.25, 1.30), 27),
+        "interior_bar": ((3.55, 3.25, 1.58), (-4.15, 5.85, 1.38), 36),
+    }
+    for name, (location, target, lens) in views.items():
+        log(f"Rendering {name}")
+        point_camera(cam, location, target, lens)
+        bpy.context.scene.render.filepath = str(RENDER_DIR / f"{name}.png")
+        bpy.ops.render.render(write_still=True)
+
+
+def export_interior():
+    log("Exporting interior GLB")
+    bpy.ops.export_scene.gltf(
+        filepath=str(EXPORT_DIR / "interior.glb"),
+        export_format="GLB",
+        export_apply=True,
+        export_cameras=False,
+        export_lights=False,
+    )
+    log("Exporting interior FBX")
+    bpy.ops.export_scene.fbx(
+        filepath=str(EXPORT_DIR / "interior.fbx"),
+        use_selection=False,
+        object_types={"MESH"},
+        apply_unit_scale=True,
+        apply_scale_options="FBX_SCALE_UNITS",
+        axis_forward="-Z",
+        axis_up="Y",
+        bake_space_transform=False,
+        add_leaf_bones=False,
+        use_mesh_modifiers=True,
+        path_mode="COPY",
+        embed_textures=False,
+    )
+    for texture_path in TEXTURES.values():
+        shutil.copy2(texture_path, EXPORT_DIR / Path(texture_path).name)
 
 
 def make_house(name, cx, cy, width, depth, front_sign, style_seed, stone=False, narrow=False, rot=0.0):
@@ -2073,9 +2356,22 @@ def main():
     log(
         f"Starting seed={SEED}, test_mode={TEST_MODE}, dusk_mode={DUSK_MODE}, "
         f"turntable_mode={TURNTABLE_MODE}, walkthrough_mode={WALKTHROUGH_MODE}, "
-        f"snow_mode={SNOW_MODE}, "
+        f"snow_mode={SNOW_MODE}, interior_mode={INTERIOR_MODE}, "
         f"Blender={bpy.app.version_string}"
     )
+    if INTERIOR_MODE:
+        log("Interior branch: skipping all town generation functions")
+        make_tavern_interior()
+        cam = setup_interior_scene()
+        validate_and_report()
+        render_interior_views(cam)
+        export_interior()
+        blend_name = "interior_test.blend" if TEST_MODE else "interior.blend"
+        bpy.ops.wm.save_as_mainfile(filepath=str(EXPORT_DIR / blend_name))
+        validate_and_report()
+        log("SUCCESS")
+        return
+
     build_streets_and_houses()
     make_tavern()
     add_cobbles()

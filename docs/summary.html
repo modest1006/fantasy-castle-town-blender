@@ -99,6 +99,16 @@
     <figcaption><b>冬の俯瞰</b> — 雪テクスチャも自前生成 (snow_surface / snow_path)</figcaption></figure>
 </div>
 
+<h2>宿屋の内装 (TOWN_INTERIOR)</h2>
+<div class="grid">
+  <figure><img src="../renders/interior_taproom.png" alt="酒場内装">
+    <figcaption><b>酒場の内装</b> (Codex実装) — 梁見せ天井、暖炉 (emission)、テーブル席、2階への階段。約4,000 tris</figcaption></figure>
+  <figure><img src="../renders/interior_bar.png" alt="バーカウンター">
+    <figcaption><b>バーカウンター</b> — 背面棚に瓶、壁ランタンの暖色光。原点=入口ドアでUnity配置が容易な設計</figcaption></figure>
+</div>
+<p>Unityでは宿屋のドアがポータルになっており、<b>Unityちゃんで街シーン⇔内装シーンを行き来できる</b>
+(DoorPortal + SpawnBridge、往復遷移をPlayモードで検証済み)。</p>
+
 <h2>Unity取り込み検証 ✅</h2>
 <div class="grid">
   <figure><img src="../renders/unity/unity_overview.png" alt="Unity俯瞰">
